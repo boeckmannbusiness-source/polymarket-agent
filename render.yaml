@@ -12,7 +12,7 @@ services:
       - key: APP_DEBUG
         value: "false"
       - key: CORS_ORIGINS
-        value: https://polymarket-agent.vercel.app
+        value: https://polymarket-agent-tau.vercel.app
       - key: LLM_DEFAULT_PROVIDER
         value: fallback
       - key: TRADING_MODE
