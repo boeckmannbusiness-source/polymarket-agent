@@ -3,7 +3,7 @@ name = "polymarket-intelligence-agent"
 version = "0.1.0"
 description = "Autonomous prediction market intelligence agent for Polymarket"
 requires-python = ">=3.11"
-license = { text = "MIT" }
+license = "MIT"
 
 dependencies = [
     # Framework
