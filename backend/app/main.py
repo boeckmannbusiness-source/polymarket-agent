@@ -1,3 +1,4 @@
+import asyncio
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
@@ -7,6 +8,8 @@ from app.config import settings
 from app.core.logging import setup_logging, logger
 from app.database import init_db
 from app.redis import close_redis
+from app.ingesters.polymarket_rest import PolymarketRESTIngester
+from app.agents.orchestrator import Orchestrator
 
 
 @asynccontextmanager
@@ -18,9 +21,29 @@ async def lifespan(app: FastAPI):
         logger.info("database_initialized")
     except Exception as e:
         logger.warning("database_init_skipped", error=str(e))
+
+    ingesters = [
+        PolymarketRESTIngester(poll_interval=120),
+    ]
+    orchestrator = Orchestrator()
+
+    bg_tasks = []
+    for ing in ingesters:
+        bg_tasks.append(asyncio.create_task(ing.run()))
+    bg_tasks.append(asyncio.create_task(orchestrator.start_all()))
+
+    logger.info("background_tasks_started", count=len(bg_tasks))
+
     yield
+
+    logger.info("shutting_down")
+    for ing in ingesters:
+        await ing.stop()
+    await orchestrator.stop_all()
+    for t in bg_tasks:
+        t.cancel()
+    await asyncio.gather(*bg_tasks, return_exceptions=True)
     await close_redis()
-    logger.info("shutting down")
 
 
 app = FastAPI(

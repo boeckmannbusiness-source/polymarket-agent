@@ -53,6 +53,7 @@ class PolymarketRESTIngester(BaseIngester):
                             self.name,
                             market,
                         )
+                        await self._upsert_market(market)
 
                     logger.info("markets_polled", count=len(markets))
 
@@ -60,6 +61,53 @@ class PolymarketRESTIngester(BaseIngester):
                 logger.error("market_poll_failed", error=str(e))
 
             await asyncio.sleep(self.poll_interval)
+
+    async def _upsert_market(self, data: dict):
+        from app.database import async_session_factory
+        from app.services.market_service import MarketService
+
+        condition_id = data.get("conditionId") or data.get("condition_id")
+        if not condition_id:
+            return
+
+        title = data.get("question") or data.get("title")
+        slug = data.get("slug")
+        description = data.get("description")
+        outcomes = data.get("outcomes")
+        volume = data.get("volume")
+        liquidity = data.get("liquidity")
+        clob_token_ids = data.get("clobTokenIds") or data.get("clob_token_ids")
+
+        start_date_str = data.get("startDate") or data.get("start_date")
+        end_date_str = data.get("endDate") or data.get("end_date")
+        start_date = _parse_ts(start_date_str) if start_date_str else None
+        end_date = _parse_ts(end_date_str) if end_date_str else None
+
+        resolved = data.get("closed", False)
+        resolution = data.get("resolvedOutcome") or data.get("resolution")
+
+        async with async_session_factory() as db:
+            service = MarketService(db)
+            try:
+                await service.upsert_market(
+                    condition_id,
+                    slug=slug,
+                    title=title,
+                    description=description,
+                    outcomes=outcomes,
+                    start_date=start_date,
+                    end_date=end_date,
+                    volume=float(volume) if volume else None,
+                    liquidity=float(liquidity) if liquidity else None,
+                    clob_token_ids=clob_token_ids,
+                    resolved=bool(resolved),
+                    resolution=resolution,
+                )
+                await db.commit()
+                logger.debug("market_upserted", condition_id=condition_id[:16])
+            except Exception as e:
+                logger.error("market_upsert_failed", condition_id=condition_id[:16], error=str(e))
+                await db.rollback()
 
     async def _poll_leaderboard(self):
         await asyncio.sleep(30)
@@ -106,6 +154,17 @@ class PolymarketRESTIngester(BaseIngester):
         except Exception as e:
             logger.error("fetch_wallet_trades_failed", wallet=wallet_address[:8], error=str(e))
         return []
+
+
+def _parse_ts(ts: str) -> Any:
+    from datetime import datetime, timezone
+    try:
+        return datetime.fromisoformat(ts.replace("Z", "+00:00"))
+    except (ValueError, AttributeError):
+        try:
+            return datetime.fromtimestamp(int(ts) / 1000, tz=timezone.utc)
+        except (ValueError, TypeError, OverflowError):
+            return None
 
 
 if __name__ == "__main__":
