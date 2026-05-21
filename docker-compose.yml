@@ -1,0 +1,80 @@
+version: "3.9"
+
+services:
+  api:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    container_name: polymarket-api
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+    ports:
+      - "8000:8000"
+    env_file: .env
+    environment:
+      - APP_ENV=development
+    volumes:
+      - ./backend:/app/app
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  ingester:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    container_name: polymarket-ingester
+    command: python -m app.ingesters.polymarket_ws
+    env_file: .env
+    volumes:
+      - ./backend:/app/app
+    restart: unless-stopped
+    depends_on:
+      api:
+        condition: service_healthy
+
+  whale-tracker:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    container_name: polymarket-whale
+    command: python -m app.services.whale_service_worker
+    env_file: .env
+    volumes:
+      - ./backend:/app/app
+    restart: unless-stopped
+    depends_on:
+      api:
+        condition: service_healthy
+
+  agent-runner:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    container_name: polymarket-agent
+    command: python -m app.agents.orchestrator
+    env_file: .env
+    volumes:
+      - ./backend:/app/app
+    restart: unless-stopped
+    depends_on:
+      api:
+        condition: service_healthy
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: polymarket-frontend
+    ports:
+      - "3000:3000"
+    environment:
+      - NEXT_PUBLIC_API_URL=http://localhost:8000
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+    restart: unless-stopped
+    depends_on:
+      - api

@@ -1,0 +1,63 @@
+[project]
+name = "polymarket-intelligence-agent"
+version = "0.1.0"
+description = "Autonomous prediction market intelligence agent for Polymarket"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+
+dependencies = [
+    # Framework
+    "fastapi>=0.115.0",
+    "uvicorn[standard]>=0.32.0",
+    "pydantic>=2.0.0",
+    "pydantic-settings>=2.0.0",
+
+    # Database
+    "sqlalchemy[asyncio]>=2.0.0",
+    "asyncpg>=0.30.0",
+    "alembic>=1.13.0",
+
+    # Redis / Events
+    "redis[hiredis]>=5.2.0",
+
+    # LLM
+    "openai>=1.55.0",
+
+    # HTTP / WebSocket
+    "httpx>=0.28.0",
+    "websockets>=13.0",
+
+    # Blockchain
+    "web3>=7.6.0",
+
+    # Observability
+    "structlog>=24.0.0",
+    "prometheus-client>=0.21.0",
+
+    # Telegram
+    "python-telegram-bot>=21.7",
+
+    # Utils
+    "python-dotenv>=1.0.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0.0",
+    "pytest-asyncio>=0.24.0",
+    "pytest-cov>=5.0.0",
+    "httpx>=0.28.0",
+    "aiosqlite>=0.20.0",
+]
+
+[build-system]
+requires = ["setuptools>=75.0.0"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["backend"]
+include = ["app*"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["backend/app/tests"]

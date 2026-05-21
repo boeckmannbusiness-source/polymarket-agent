@@ -1,0 +1,97 @@
+from pathlib import Path
+from pydantic_settings import BaseSettings, SettingsConfigDict
+from typing import Literal
+
+
+def _find_dotenv() -> str:
+    candidates = [
+        Path.cwd() / ".env",
+        Path(__file__).resolve().parent.parent / ".env",
+        Path(__file__).resolve().parent.parent.parent / ".env",
+    ]
+    for p in candidates:
+        if p.exists():
+            return str(p)
+    return ".env"
+
+
+class Settings(BaseSettings):
+    model_config = SettingsConfigDict(env_file=_find_dotenv(), env_file_encoding="utf-8", extra="ignore")
+
+    # App
+    APP_ENV: Literal["development", "staging", "production", "test"] = "development"
+    APP_DEBUG: bool = True
+    APP_PORT: int = 8000
+    CORS_ORIGINS: str = "http://localhost:3000"
+
+    # Polymarket APIs
+    POLYMARKET_CLOB_API_URL: str = "https://clob.polymarket.com"
+    POLYMARKET_GAMMA_API_URL: str = "https://gamma-api.polymarket.com"
+    POLYMARKET_DATA_API_URL: str = "https://data-api.polymarket.com"
+    POLYMARKET_WS_URL: str = "wss://ws-subscriptions-clob.polymarket.com/ws/market"
+    POLYMARKET_API_KEY: str = ""
+    POLYMARKET_SECRET: str = ""
+    POLYMARKET_PASSPHRASE: str = ""
+    POLYMARKET_ETH_PRIVATE_KEY: str = ""
+
+    # Polygon
+    POLYGON_RPC_URL: str = "https://polygon-rpc.com"
+    POLYGON_WS_URL: str = "wss://polygon-rpc.com/ws"
+    POLYGON_CHAIN_ID: int = 137
+
+    # Smart Contracts
+    CTF_EXCHANGE_ADDRESS: str = "0xE111180000d2663C0091e4f400237545B87B996B"
+    NEG_RISK_CTF_EXCHANGE_ADDRESS: str = "0xe2222d279d744050d28e00520010520000310F59"
+    CONDITIONAL_TOKENS_ADDRESS: str = "0x4D97DCd97eC945f40cF65F87097ACe5EA0476045"
+    PUSD_TOKEN_ADDRESS: str = "0xC011a7E12a19f7B1f670d46F03B03f3342E82DFB"
+
+    # LLM
+    LLM_DEFAULT_PROVIDER: str = "openrouter"
+    OPENROUTER_API_KEY: str = ""
+    OPENROUTER_BASE_URL: str = "https://openrouter.ai/api/v1"
+    OPENROUTER_DEFAULT_MODEL: str = "anthropic/claude-3.5-sonnet"
+    OLLAMA_BASE_URL: str = "http://localhost:11434"
+    OLLAMA_API_KEY: str = ""
+    OLLAMA_DEFAULT_MODEL: str = "llama3"
+    MISTRAL_API_KEY: str = ""
+    MISTRAL_DEFAULT_MODEL: str = "mistral-small-latest"
+    ZAI_API_KEY: str = ""
+    ZAI_BASE_URL: str = ""
+    ZAI_DEFAULT_MODEL: str = "z-ai-model"
+    GROQ_API_KEY: str = ""
+    GROQ_DEFAULT_MODEL: str = "llama-3.3-70b-versatile"
+
+    # Database
+    DATABASE_URL: str = "postgresql+asyncpg://user:password@host:5432/polymarket"
+    DATABASE_POOL_SIZE: int = 20
+    DATABASE_MAX_OVERFLOW: int = 10
+
+    # Redis
+    REDIS_URL: str = "redis://user:password@host:6379/0"
+    REDIS_MAX_CONNECTIONS: int = 50
+
+    # Telegram
+    TELEGRAM_BOT_TOKEN: str = ""
+    TELEGRAM_CHAT_ID: str = ""
+    TELEGRAM_ALERT_LEVEL: str = "info"
+
+    # Trading
+    TRADING_MODE: Literal["paper", "live"] = "paper"
+    PAPER_INITIAL_CAPITAL: float = 10000.0
+    MAX_POSITION_SIZE_PERCENT: float = 10.0
+    MAX_DAILY_LOSS: float = 500.0
+    MAX_OPEN_POSITIONS: int = 5
+    EXPOSURE_LIMIT: float = 0.3
+    COOLDOWN_MINUTES: int = 15
+    MIN_CONFIDENCE_THRESHOLD: float = 0.6
+    STOP_LOSS_PERCENT: float = 15.0
+    TAKE_PROFIT_PERCENT: float = 50.0
+
+    # Monitoring
+    LOG_LEVEL: str = "INFO"
+    LOG_FORMAT: Literal["json", "text"] = "json"
+    METRICS_ENABLED: bool = True
+    HEARTBEAT_INTERVAL_SECONDS: int = 30
+
+
+settings = Settings()
