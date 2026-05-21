@@ -1,0 +1,37 @@
+services:
+  - type: web
+    name: polymarket-agent
+    runtime: docker
+    repo: https://github.com/boeckmannbusiness-source/polymarket-agent
+    dockerfilePath: backend/Dockerfile
+    region: frankfurt
+    plan: free
+    envVars:
+      - key: APP_ENV
+        value: production
+      - key: APP_DEBUG
+        value: "false"
+      - key: CORS_ORIGINS
+        value: https://polymarket-agent.vercel.app
+      - key: LLM_DEFAULT_PROVIDER
+        value: fallback
+      - key: TRADING_MODE
+        value: paper
+      - key: DATABASE_URL
+        sync: false
+      - key: REDIS_URL
+        sync: false
+      - key: ZAI_API_KEY
+        sync: false
+      - key: ZAI_DEFAULT_MODEL
+        value: glm-4.7-flash
+      - key: GROQ_API_KEY
+        sync: false
+      - key: MISTRAL_API_KEY
+        sync: false
+      - key: OLLAMA_API_KEY
+        sync: false
+      - key: OLLAMA_BASE_URL
+        value: https://ollama.com/api
+      - key: OLLAMA_DEFAULT_MODEL
+        value: ministral-3:3b
