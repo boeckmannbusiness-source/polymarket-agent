@@ -105,8 +105,8 @@ async def backfill_events():
         result = await db.execute(select(Market))
         markets = list(result.scalars().all())
         count = 0
-        for market in markets[:50]:
-            for i in range(5):
+        for market in markets[:3]:
+            for i in range(3):
                 price = round(random.uniform(0.1, 0.9), 4)
                 vol = float(market.volume) if market.volume else 1000
                 event = MarketEvent(
