@@ -100,28 +100,22 @@ async def backfill_events():
     from sqlalchemy import select
     import random
 
+    now = datetime.now(timezone.utc)
     async with async_session_factory() as db:
-        result = await db.execute(select(Market).where(Market.volume > 0))
+        result = await db.execute(select(Market))
         markets = list(result.scalars().all())
         count = 0
-        days = 7
         for market in markets:
-            base_price = random.uniform(0.3, 0.7)
-            base_vol = float(market.volume or 1000) / days if market.volume else 1000
-            start = market.created_at or datetime.now(timezone.utc) - timedelta(days=days)
-            for d in range(days * random.randint(3, 8)):
-                t = start + timedelta(
-                    days=random.randint(0, days - 1),
-                    hours=random.randint(8, 22),
-                    minutes=random.randint(0, 59),
-                )
-                price = max(0.01, min(0.99, base_price + random.uniform(-0.05, 0.05)))
+            for i in range(20):
+                price = round(random.uniform(0.1, 0.9), 4)
+                vol = float(market.volume) if market.volume else 1000
                 event = MarketEvent(
                     market_id=market.id, event_type="trade", price=price,
-                    size=random.uniform(10, max(base_vol / 10, 100)),
+                    size=vol / 20,
                     maker_address=None, taker_address=None,
-                    side=random.choice(["buy", "sell"]),
-                    outcome=random.choice(["YES", "NO"]), timestamp=t,
+                    side="buy" if i < 10 else "sell",
+                    outcome="YES" if price > 0.5 else "NO",
+                    timestamp=now - timedelta(hours=i * 6),
                 )
                 db.add(event)
                 count += 1
