@@ -92,6 +92,36 @@ async def system_status():
     }
 
 
+@app.get("/debug/replay-check")
+async def debug_replay_check():
+    from app.database import async_session_factory
+    from app.replay.engine import ReplayEngine, ReplayMode
+    from app.services.execution_simulator import ExecutionSimulator
+    from datetime import datetime, timezone, timedelta
+
+    now = datetime.now(timezone.utc)
+    async with async_session_factory() as db:
+        engine = ReplayEngine(db, ExecutionSimulator())
+        result = await engine.run(
+            strategy_name="whale_following",
+            start_time=now - timedelta(days=7),
+            end_time=now,
+            mode=ReplayMode.SIGNAL_ONLY,
+            signal_interval_seconds=1,
+        )
+        return {
+            "events_found": result.total_events_processed,
+            "signals_generated": result.signals_generated,
+            "signals_count": len(result.signals),
+            "sample_signal": {
+                "strategy": s.strategy_name,
+                "signal": s.signal.signal,
+                "confidence": s.signal.confidence,
+                "price": s.entry_price,
+            } for s in result.signals[:3] if result.signals else "none",
+        }
+
+
 @app.get("/debug/backfill-events/{n_markets}/{n_per_market}")
 async def backfill_events(n_markets: int = 3, n_per_market: int = 3):
     from app.database import async_session_factory
