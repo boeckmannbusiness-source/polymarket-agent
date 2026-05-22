@@ -30,7 +30,7 @@ class Market(Base):
     resolution: Mapped[str | None] = mapped_column(String(64), nullable=True)
     resolution_source: Mapped[str | None] = mapped_column(String(256), nullable=True)
 
-    events: Mapped[list["MarketEvent"]] = relationship(back_populates="market", lazy="dynamic")
+    events: Mapped[list["MarketEvent"]] = relationship(back_populates="market", lazy="selectin")
 
 
 class MarketEvent(Base):

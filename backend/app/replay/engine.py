@@ -269,9 +269,13 @@ class ReplayEngine:
         return results
 
     async def _load_events(self, start_time: datetime, end_time: datetime, market_ids: list[str] | None):
-        query = select(MarketEvent).where(
-            MarketEvent.timestamp.between(start_time, end_time)
-        ).order_by(MarketEvent.timestamp)
+        from sqlalchemy.orm import selectinload
+        query = (
+            select(MarketEvent)
+            .options(selectinload(MarketEvent.market))
+            .where(MarketEvent.timestamp.between(start_time, end_time))
+            .order_by(MarketEvent.timestamp)
+        )
 
         if market_ids:
             from app.models import Market
