@@ -109,16 +109,16 @@ async def debug_replay_check():
             mode=ReplayMode.SIGNAL_ONLY,
             signal_interval_seconds=1,
         )
+        samples = [
+            {"strategy": s.strategy_name, "signal": s.signal.signal,
+             "confidence": s.signal.confidence, "price": s.entry_price}
+            for s in result.signals[:3]
+        ]
         return {
             "events_found": result.total_events_processed,
             "signals_generated": result.signals_generated,
             "signals_count": len(result.signals),
-            "sample_signal": {
-                "strategy": s.strategy_name,
-                "signal": s.signal.signal,
-                "confidence": s.signal.confidence,
-                "price": s.entry_price,
-            } for s in result.signals[:3] if result.signals else "none",
+            "sample_signals": samples,
         }
 
 
