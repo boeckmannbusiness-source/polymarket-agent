@@ -96,44 +96,6 @@ async def system_status():
 async def backfill_events():
     from app.database import async_session_factory
     from app.models import Market, MarketEvent
-    from datetime import datetime, timezone
-    import random
-
-    async with async_session_factory() as db:
-        result = await db.execute(select(Market).where(Market.volume > 0))
-        markets = list(result.scalars().all())
-        count = 0
-        for market in markets:
-            days = 7
-            base_price = random.uniform(0.3, 0.7)
-            base_vol = float(market.volume or 1000) / days if market.volume else 1000
-            for d in range(days):
-                for _ in range(random.randint(1, 5)):
-                    t = market.created_at or datetime.now(timezone.utc) - timedelta(days=days - d)
-                    t = t.replace(hour=random.randint(8, 22), minute=random.randint(0, 59))
-                    drift = random.uniform(-0.05, 0.05)
-                    price = max(0.01, min(0.99, base_price + drift))
-                    event = MarketEvent(
-                        market_id=market.id,
-                        event_type="trade",
-                        price=price,
-                        size=random.uniform(10, max(base_vol / 10, 100)),
-                        maker_address=None,
-                        taker_address=None,
-                        side=random.choice(["buy", "sell"]),
-                        outcome=random.choice(["YES", "NO"]),
-                        timestamp=t,
-                    )
-                    db.add(event)
-                    count += 1
-        await db.commit()
-        return {"events_created": count}
-
-
-@app.post("/debug/backfill-events")
-async def backfill_events():
-    from app.database import async_session_factory
-    from app.models import Market, MarketEvent
     from datetime import datetime, timezone, timedelta
     from sqlalchemy import select
     import random
