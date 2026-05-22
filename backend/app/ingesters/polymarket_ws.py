@@ -143,6 +143,17 @@ class PolymarketWSIngester(BaseIngester):
     async def _message_loop(self):
         while self.running:
             try:
+                if self.ws is None or self.ws.closed:
+                    self._reconnect_count += 1
+                    logger.warning("ws_not_connected, reconnecting...", reconnect=self._reconnect_count)
+                    await asyncio.sleep(5)
+                    try:
+                        await self.connect()
+                    except Exception as e:
+                        logger.error("ws_reconnect_failed", error=str(e))
+                    await asyncio.sleep(1)
+                    continue
+
                 message = await self.ws.recv()
                 self._messages_received += 1
                 self._last_message_time = datetime.now(timezone.utc)
