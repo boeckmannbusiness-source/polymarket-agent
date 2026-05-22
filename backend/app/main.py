@@ -176,12 +176,10 @@ async def debug_backfill_clob_ids():
     async with async_session_factory() as db:
         result = await db.execute(text("""
             UPDATE markets
-            SET clob_token_ids = string_to_array(
-                regexp_replace(array_to_string(clob_token_ids, ''), '^\\["|"\\]$', '', 'g'),
-                '","'
-            )
+            SET clob_token_ids = string_to_array(clob_token_ids[1], '", "')
             WHERE clob_token_ids IS NOT NULL
-            AND array_to_string(clob_token_ids, '') ~ '^\\[".+"\\]$'
+            AND array_length(clob_token_ids, 1) = 1
+            AND clob_token_ids[1] LIKE '%", "%'
             RETURNING condition_id
         """))
         fixed = len(result.all())
