@@ -171,42 +171,21 @@ async def backfill_events(n_markets: int = 3, n_per_market: int = 3):
 @app.post("/debug/backfill-clob-ids")
 async def debug_backfill_clob_ids():
     from app.database import async_session_factory
-    from app.models import Market
-    from sqlalchemy import select, update
-    import httpx
-    import json as _json
+    from sqlalchemy import text
 
-    fixed = 0
-    async with httpx.AsyncClient(timeout=15.0) as client:
-        async with async_session_factory() as db:
-            result = await db.execute(select(Market))
-            markets = list(result.scalars().all())
-            for market in markets:
-                try:
-                    resp = await client.get(
-                        f"{settings.POLYMARKET_GAMMA_API_URL}/markets/{market.condition_id}"
-                    )
-                    if resp.status_code != 200:
-                        continue
-                    data = resp.json()
-                    raw = data.get("clobTokenIds") or data.get("clob_token_ids")
-                    if not raw:
-                        continue
-                    if isinstance(raw, list):
-                        ids = [str(t) for t in raw if t]
-                    elif isinstance(raw, str):
-                        try:
-                            ids = [str(t) for t in _json.loads(raw)]
-                        except Exception:
-                            ids = []
-                    else:
-                        ids = []
-                    if ids and (not market.clob_token_ids or set(market.clob_token_ids) != set(ids)):
-                        market.clob_token_ids = ids
-                        fixed += 1
-                except Exception:
-                    pass
-            await db.commit()
+    async with async_session_factory() as db:
+        result = await db.execute(text("""
+            UPDATE markets
+            SET clob_token_ids = string_to_array(
+                regexp_replace(array_to_string(clob_token_ids, ''), '^\\["|"\\]$', '', 'g'),
+                '","'
+            )
+            WHERE clob_token_ids IS NOT NULL
+            AND array_to_string(clob_token_ids, '') ~ '^\\[".+"\\]$'
+            RETURNING condition_id
+        """))
+        fixed = len(result.all())
+        await db.commit()
     return {"markets_fixed": fixed}
 
 
