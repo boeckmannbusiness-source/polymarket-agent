@@ -15,6 +15,7 @@ from .strategy_ranking_service import StrategyRankingService
 from .execution_simulator import ExecutionSimulator
 from .regime_service import RegimeService
 from .safety_service import SafetyService
+from .event_bridge import EventPersistenceBridge
 
 __all__ = [
     "MarketService",
@@ -34,4 +35,5 @@ __all__ = [
     "ExecutionSimulator",
     "RegimeService",
     "SafetyService",
+    "EventPersistenceBridge",
 ]

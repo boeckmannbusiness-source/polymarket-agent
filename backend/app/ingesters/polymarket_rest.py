@@ -32,6 +32,7 @@ class PolymarketRESTIngester(BaseIngester):
         await self.client.aclose()
 
     async def _poll_markets(self):
+        logger.info("market_poller_started", interval=self.poll_interval)
         while self.running:
             try:
                 params = {
@@ -45,7 +46,8 @@ class PolymarketRESTIngester(BaseIngester):
                     params=params,
                 )
                 if response.status_code == 200:
-                    markets = response.json()
+                    data = response.json()
+                    markets = data if isinstance(data, list) else data.get("data", [])
                     for market in markets:
                         await EventBus.publish(
                             "market:data",

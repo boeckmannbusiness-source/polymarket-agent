@@ -9,41 +9,52 @@ from app.core.logging import setup_logging, logger
 from app.database import init_db
 from app.redis import close_redis
 from app.ingesters.polymarket_rest import PolymarketRESTIngester
+from app.ingesters.polymarket_ws import PolymarketWSIngester
 from app.agents.orchestrator import Orchestrator
+from app.services.event_bridge import EventPersistenceBridge
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     setup_logging()
-    logger.info("starting up", env=settings.APP_ENV, mode=settings.TRADING_MODE)
+    logger.info("starting_up", env=settings.APP_ENV, mode=settings.TRADING_MODE)
     try:
         await init_db()
         logger.info("database_initialized")
     except Exception as e:
         logger.warning("database_init_skipped", error=str(e))
 
-    ingesters = [
-        PolymarketRESTIngester(poll_interval=120),
-    ]
+    rest_ingester = PolymarketRESTIngester(poll_interval=60)
+    ws_ingester = PolymarketWSIngester()
+    bridge = EventPersistenceBridge()
     orchestrator = Orchestrator()
 
     bg_tasks = []
-    for ing in ingesters:
-        bg_tasks.append(asyncio.create_task(ing.run()))
-    bg_tasks.append(asyncio.create_task(orchestrator.start_all()))
 
-    logger.info("background_tasks_started", count=len(bg_tasks))
+    bg_tasks.append(asyncio.create_task(rest_ingester.run(), name="rest_ingester"))
+    logger.info("rest_ingester_started", interval=60)
+
+    bg_tasks.append(asyncio.create_task(ws_ingester.run(), name="ws_ingester"))
+    logger.info("ws_ingester_started")
+
+    bg_tasks.append(asyncio.create_task(bridge.start(), name="event_bridge"))
+    logger.info("event_bridge_started")
+
+    bg_tasks.append(asyncio.create_task(orchestrator.start_all(), name="orchestrator"))
+    logger.info("orchestrator_started")
 
     yield
 
     logger.info("shutting_down")
-    for ing in ingesters:
-        await ing.stop()
+    await rest_ingester.stop()
+    await ws_ingester.stop()
+    await bridge.stop()
     await orchestrator.stop_all()
     for t in bg_tasks:
         t.cancel()
     await asyncio.gather(*bg_tasks, return_exceptions=True)
     await close_redis()
+    logger.info("shutdown_complete")
 
 
 app = FastAPI(
@@ -64,6 +75,55 @@ app.add_middleware(
 @app.get("/health")
 async def health():
     return {"status": "ok", "mode": settings.TRADING_MODE, "env": settings.APP_ENV}
+
+
+@app.get("/system/status")
+async def system_status():
+    return {
+        "app": {"env": settings.APP_ENV, "mode": settings.TRADING_MODE},
+        "ingesters": {
+            "rest": "started",
+            "websocket": "started",
+        },
+        "orchestrator": "started",
+        "services": {
+            "event_bridge": "started",
+        },
+    }
+
+
+@app.get("/debug/db-counts")
+async def db_counts():
+    from app.database import async_session_factory
+    from sqlalchemy import select, func
+    from app.models import (
+        Market, MarketEvent, Signal, Trade, Position,
+        PortfolioSnapshot, SignalOutcome, MarketStateSnapshot,
+        Wallet, WalletTrade, StrategyConfigRecord,
+    )
+
+    async with async_session_factory() as db:
+        tables = {
+            "markets": Market,
+            "market_events": MarketEvent,
+            "signals": Signal,
+            "trades": Trade,
+            "positions": Position,
+            "portfolio_snapshots": PortfolioSnapshot,
+            "signal_outcomes": SignalOutcome,
+            "market_state_snapshots": MarketStateSnapshot,
+            "wallets": Wallet,
+            "wallet_trades": WalletTrade,
+            "strategy_configs": StrategyConfigRecord,
+        }
+        counts = {}
+        for name, model in tables.items():
+            try:
+                result = await db.execute(select(func.count()).select_from(model))
+                counts[name] = result.scalar() or 0
+            except Exception as e:
+                counts[name] = str(e)
+        return counts
 
 
 # Import and include routers

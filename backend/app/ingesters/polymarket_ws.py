@@ -36,7 +36,11 @@ class PolymarketWSIngester(BaseIngester):
 
     async def run(self):
         self.running = True
-        await self.connect()
+        logger.info("ws_ingester_started")
+        try:
+            await self.connect()
+        except Exception as e:
+            logger.error("ws_connect_failed", error=str(e), will_retry=True)
         self._tasks.append(asyncio.create_task(self._heartbeat()))
         await self._message_loop()
 
