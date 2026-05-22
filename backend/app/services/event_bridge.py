@@ -21,7 +21,6 @@ class EventPersistenceBridge:
     async def start(self):
         self.running = True
         self._tasks.append(asyncio.create_task(self._consume_market_events()))
-        self._tasks.append(asyncio.create_task(self._consume_trade_events()))
         logger.info("event_persistence_bridge_started")
 
     async def stop(self):
@@ -43,20 +42,6 @@ class EventPersistenceBridge:
                 break
             except Exception as e:
                 logger.error("persist_market_events_error", error=str(e))
-                await asyncio.sleep(1)
-
-    async def _consume_trade_events(self):
-        r = await EventBus.subscribe_to_stream("trade:execution", "persistence_bridge", "writer_1")
-        while self.running:
-            try:
-                messages = await EventBus.read_stream(r, "trade:execution", "persistence_bridge", "writer_1", block=5000)
-                for msg in messages:
-                    await EventBus.ack_message(r, "trade:execution", "persistence_bridge", msg["id"])
-                    self._processed += 1
-            except asyncio.CancelledError:
-                break
-            except Exception as e:
-                logger.error("persist_trade_events_error", error=str(e))
                 await asyncio.sleep(1)
 
     async def _persist_market_event(self, msg: dict):
@@ -84,13 +69,7 @@ class EventPersistenceBridge:
                 except Exception:
                     pass
 
-        ts_str = data.get("timestamp")
-        ts = None
-        if ts_str:
-            try:
-                ts = datetime.fromisoformat(str(ts_str).replace("Z", "+00:00"))
-            except (ValueError, AttributeError):
-                ts = datetime.now(timezone.utc)
+        ts = _parse_timestamp(data.get("timestamp"))
 
         async with async_session_factory() as db:
             try:
@@ -104,7 +83,7 @@ class EventPersistenceBridge:
                     taker_address=data.get("taker"),
                     outcome=data.get("outcome"),
                     transaction_hash=data.get("transaction_hash"),
-                    timestamp=ts or datetime.now(timezone.utc),
+                    timestamp=ts,
                 )
                 db.add(event)
                 await db.commit()
@@ -165,6 +144,20 @@ class EventPersistenceBridge:
             "failed_count": self._failed_count,
             "dlq_size": len(self._dlq),
         }
+
+
+def _parse_timestamp(raw) -> datetime:
+    if raw is None:
+        return datetime.now(timezone.utc)
+    try:
+        if isinstance(raw, (int, float)):
+            return datetime.fromtimestamp(raw / 1000, tz=timezone.utc)
+        s = str(raw).strip()
+        if s.isdigit() or (s.replace(".", "").replace("-", "").isdigit()):
+            return datetime.fromtimestamp(float(s) / 1000, tz=timezone.utc)
+        return datetime.fromisoformat(s.replace("Z", "+00:00"))
+    except (ValueError, TypeError, OSError):
+        return datetime.now(timezone.utc)
 
 
 def _parse_clob_ids(raw) -> list[str] | None:

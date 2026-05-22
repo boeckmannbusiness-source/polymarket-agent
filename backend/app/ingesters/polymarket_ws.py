@@ -80,9 +80,6 @@ class PolymarketWSIngester(BaseIngester):
                 subscribe_msg = {
                     "type": "market",
                     "assets_ids": chunk,
-                    "initial_dump": True,
-                    "level": 2,
-                    "custom_feature_enabled": False,
                 }
                 await self.ws.send(json.dumps(subscribe_msg))
             logger.info("ws_subscribed", asset_count=len(sub_ids), chunks=(len(sub_ids) + chunk_size - 1) // chunk_size)
@@ -110,12 +107,12 @@ class PolymarketWSIngester(BaseIngester):
     async def _heartbeat(self):
         while self.running:
             try:
-                if self.ws:
-                    await self.ws.send("PING")
-                await asyncio.sleep(10)
+                if self.ws and getattr(self.ws, 'close_code', None) is None:
+                    await self.ws.ping()
+                await asyncio.sleep(30)
             except Exception as e:
                 logger.error("heartbeat_failed", error=str(e))
-                break
+                await asyncio.sleep(5)
 
     async def _subscription_refresher(self):
         await asyncio.sleep(300)
@@ -128,7 +125,7 @@ class PolymarketWSIngester(BaseIngester):
                     chunk_size = 200
                     for i in range(0, len(new_ids), chunk_size):
                         chunk = new_ids[i : i + chunk_size]
-                        msg = {"operation": "subscribe", "assets_ids": chunk}
+                        msg = {"type": "market", "assets_ids": chunk}
                         await self.ws.send(json.dumps(msg))
                     self._subscribed_assets.extend(new_ids)
                     logger.info("ws_subscribed_new_assets", count=len(new_ids))
