@@ -207,9 +207,11 @@ async def debug_ws_status():
     if _ws_ingester is None:
         return {"error": "ws_ingester_not_initialized"}
     try:
-        return _ws_ingester.stats
+        s = _ws_ingester.stats
+        return s
     except Exception as e:
-        return {"error": str(e), "ingester_initialized": True}
+        import traceback
+        return {"error": str(e), "ingester_initialized": True, "traceback": traceback.format_exc()}
 
 
 @app.get("/debug/ws-mappings")
@@ -226,7 +228,6 @@ async def debug_ws_mappings():
         )
         rows = result.all()
     mappings = []
-    orphans = []
     for condition_id, token_ids, slug, title, resolved in rows:
         ids = [t for t in (token_ids or []) if t]
         if not ids:
@@ -239,26 +240,11 @@ async def debug_ws_mappings():
                 "title": (title or "")[:60],
                 "resolved": resolved,
             })
-    async with async_session_factory() as db:
-        all_events = await db.execute(
-            select(MarketEvent.event_data)
-            .where(MarketEvent.event_data["asset_id"].as_string().isnot(None))
-            .limit(1000)
-        )
-        seen_assets = set()
-        for row in all_events:
-            aid = row[0].get("asset_id") if row[0] else None
-            if aid:
-                seen_assets.add(aid)
     mapped_assets = {m["asset_id"] for m in mappings}
-    for aid in seen_assets:
-        if aid not in mapped_assets:
-            orphans.append(aid)
     return {
         "total_mappings": len(mappings),
         "sample": mappings[:50],
-        "orphan_asset_ids": orphans[:50],
-        "orphan_count": len(orphans),
+        "unique_asset_ids": len(mapped_assets),
     }
 
 
