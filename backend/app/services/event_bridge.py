@@ -23,6 +23,23 @@ class EventPersistenceBridge:
         self._tasks.append(asyncio.create_task(self._consume_market_events()))
         logger.info("event_persistence_bridge_started")
 
+    async def consume_pending(self, count: int = 100) -> dict:
+        r = await EventBus.subscribe_to_stream("market:data", "persistence_bridge", "writer_1")
+        messages = await EventBus.read_stream(r, "market:data", "persistence_bridge", "writer_1", count=count, block=1000)
+        persisted = 0
+        failed = 0
+        for msg in messages:
+            try:
+                await self._persist_market_event(msg)
+                await EventBus.ack_message(r, "market:data", "persistence_bridge", msg["id"])
+                self._processed += 1
+                persisted += 1
+            except Exception as e:
+                self._failed_count += 1
+                failed += 1
+                logger.error("force_consume_failed", error=str(e))
+        return {"consumed": len(messages), "persisted": persisted, "failed": failed}
+
     async def stop(self):
         self.running = False
         for t in self._tasks:

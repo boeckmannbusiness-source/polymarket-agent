@@ -158,6 +158,9 @@ class PolymarketWSIngester(BaseIngester):
 
                 event_type = data.get("type") or data.get("event_type", "unknown")
 
+                if self._messages_received % 20 == 0:
+                    logger.info("ws_msg_sample", type=event_type, keys=list(data.keys())[:8])
+
                 if event_type == "last_trade_price":
                     asset_id = data.get("asset_id")
                     condition_id = self._asset_to_condition.get(asset_id) if asset_id else None
