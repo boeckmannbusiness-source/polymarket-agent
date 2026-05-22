@@ -80,7 +80,18 @@ class PolymarketRESTIngester(BaseIngester):
         outcomes = data.get("outcomes")
         volume = data.get("volume")
         liquidity = data.get("liquidity")
-        clob_token_ids = data.get("clobTokenIds") or data.get("clob_token_ids")
+        raw_ids = data.get("clobTokenIds") or data.get("clob_token_ids")
+        clob_token_ids = None
+        if raw_ids:
+            if isinstance(raw_ids, list):
+                clob_token_ids = [str(t) for t in raw_ids if t]
+            elif isinstance(raw_ids, str):
+                import json as _json
+                try:
+                    parsed = _json.loads(raw_ids)
+                    clob_token_ids = [str(t) for t in parsed] if isinstance(parsed, list) else [raw_ids]
+                except (_json.JSONDecodeError, TypeError):
+                    clob_token_ids = [raw_ids]
 
         start_date_str = data.get("startDate") or data.get("start_date")
         end_date_str = data.get("endDate") or data.get("end_date")

@@ -131,7 +131,7 @@ class EventPersistenceBridge:
                     outcomes=data.get("outcomes"),
                     volume=float(data["volume"]) if data.get("volume") else None,
                     liquidity=float(data["liquidity"]) if data.get("liquidity") else None,
-                    clob_token_ids=data.get("clobTokenIds") or data.get("clob_token_ids"),
+                    clob_token_ids=_parse_clob_ids(data.get("clobTokenIds") or data.get("clob_token_ids")),
                     resolved=bool(data.get("closed", False)),
                     resolution=data.get("resolvedOutcome") or data.get("resolution"),
                 )
@@ -165,3 +165,18 @@ class EventPersistenceBridge:
             "failed_count": self._failed_count,
             "dlq_size": len(self._dlq),
         }
+
+
+def _parse_clob_ids(raw) -> list[str] | None:
+    if not raw:
+        return None
+    if isinstance(raw, list):
+        return [str(t) for t in raw if t]
+    if isinstance(raw, str):
+        import json as _json
+        try:
+            parsed = _json.loads(raw)
+            return [str(t) for t in parsed] if isinstance(parsed, list) else [raw]
+        except (_json.JSONDecodeError, TypeError):
+            return [raw]
+    return None

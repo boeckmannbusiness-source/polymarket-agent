@@ -168,6 +168,48 @@ async def backfill_events(n_markets: int = 3, n_per_market: int = 3):
         return {"events_created": count, "markets_seeded": len(markets)}
 
 
+@app.post("/debug/backfill-clob-ids")
+async def debug_backfill_clob_ids():
+    from app.database import async_session_factory
+    from app.models import Market
+    from sqlalchemy import select, update
+    import httpx
+    import json as _json
+
+    fixed = 0
+    async with httpx.AsyncClient(timeout=15.0) as client:
+        async with async_session_factory() as db:
+            result = await db.execute(select(Market))
+            markets = list(result.scalars().all())
+            for market in markets:
+                try:
+                    resp = await client.get(
+                        f"{settings.POLYMARKET_GAMMA_API_URL}/markets/{market.condition_id}"
+                    )
+                    if resp.status_code != 200:
+                        continue
+                    data = resp.json()
+                    raw = data.get("clobTokenIds") or data.get("clob_token_ids")
+                    if not raw:
+                        continue
+                    if isinstance(raw, list):
+                        ids = [str(t) for t in raw if t]
+                    elif isinstance(raw, str):
+                        try:
+                            ids = [str(t) for t in _json.loads(raw)]
+                        except Exception:
+                            ids = []
+                    else:
+                        ids = []
+                    if ids and (not market.clob_token_ids or set(market.clob_token_ids) != set(ids)):
+                        market.clob_token_ids = ids
+                        fixed += 1
+                except Exception:
+                    pass
+            await db.commit()
+    return {"markets_fixed": fixed}
+
+
 @app.get("/debug/db-counts")
 async def db_counts():
     from app.database import async_session_factory

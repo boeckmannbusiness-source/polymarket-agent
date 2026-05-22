@@ -55,6 +55,17 @@ class MarketService:
         return list(result.scalars().all())
 
     async def upsert_market(self, condition_id: str, **kwargs) -> Market:
+        clob = kwargs.get("clob_token_ids")
+        if clob is not None:
+            if isinstance(clob, str):
+                import json as _json
+                try:
+                    kwargs["clob_token_ids"] = [str(t) for t in _json.loads(clob)]
+                except (_json.JSONDecodeError, TypeError):
+                    kwargs["clob_token_ids"] = [clob]
+            elif isinstance(clob, list):
+                kwargs["clob_token_ids"] = [str(t) for t in clob if t]
+
         result = await self.db.execute(select(Market).where(Market.condition_id == condition_id))
         market = result.scalar_one_or_none()
         if market:
