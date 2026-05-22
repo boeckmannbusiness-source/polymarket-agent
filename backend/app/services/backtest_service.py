@@ -1,17 +1,18 @@
 import uuid
 from datetime import datetime, timezone
-from decimal import Decimal
 from typing import Any
 
 from sqlalchemy import select, desc
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models import BacktestRun, BacktestTrade, MarketEvent, Trade
+from app.models import BacktestRun, BacktestTrade
+from app.services.backtest_engine import BacktestEngine
 
 
 class BacktestService:
     def __init__(self, db: AsyncSession):
         self.db = db
+        self.engine = BacktestEngine(db)
 
     async def list_runs(self, skip: int = 0, limit: int = 20) -> list[BacktestRun]:
         result = await self.db.execute(
@@ -19,9 +20,18 @@ class BacktestService:
         )
         return list(result.scalars().all())
 
-    async def get_run(self, run_id: uuid.UUID) -> BacktestRun:
+    async def get_run(self, run_id: uuid.UUID) -> BacktestRun | None:
         result = await self.db.execute(select(BacktestRun).where(BacktestRun.id == run_id))
         return result.scalar_one_or_none()
+
+    async def get_run_trades(self, run_id: uuid.UUID, skip: int = 0, limit: int = 100) -> list[BacktestTrade]:
+        result = await self.db.execute(
+            select(BacktestTrade)
+            .where(BacktestTrade.backtest_run_id == run_id)
+            .order_by(BacktestTrade.entry_timestamp)
+            .offset(skip).limit(limit)
+        )
+        return list(result.scalars().all())
 
     async def create_run(
         self,
@@ -38,63 +48,55 @@ class BacktestService:
             start_date=start_date,
             end_date=end_date,
             initial_capital=initial_capital,
-            status="running",
+            status="pending",
         )
         self.db.add(run)
         await self.db.flush()
         return run
 
-    async def run_backtest(self, run_id: uuid.UUID):
+    async def execute_run(self, run_id: uuid.UUID) -> BacktestRun:
         run = await self.get_run(run_id)
         if not run:
-            return
-
-        capital = float(run.initial_capital or 10000.0)
-        trades: list[BacktestTrade] = []
-        pnls: list[float] = []
-
-        events = await self.db.execute(
-            select(MarketEvent)
-            .where(MarketEvent.timestamp.between(run.start_date, run.end_date))
-            .order_by(MarketEvent.timestamp)
-        )
-        market_events = list(events.scalars().all())
-
-        for event in market_events:
-            if event.event_type == "trade" and event.price and event.size:
-                trade = BacktestTrade(
-                    backtest_run_id=run_id,
-                    market_id=event.market_id,
-                    side="buy" if event.taker_address else "sell",
-                    outcome=event.outcome or "unknown",
-                    entry_price=float(event.price),
-                    size=float(event.size),
-                    entry_timestamp=event.timestamp,
-                    metadata={"event_id": event.id},
-                )
-                trades.append(trade)
-
-        win_count = sum(1 for t in trades if t.pnl and t.pnl > 0)
-        loss_count = sum(1 for t in trades if t.pnl and t.pnl <= 0)
-        total_trades = len(trades)
-        win_rate = win_count / total_trades if total_trades > 0 else 0
-
-        if pnls:
-            avg_pnl = sum(pnls) / len(pnls)
-            import math
-            variance = sum((p - avg_pnl) ** 2 for p in pnls) / len(pnls)
-            std_dev = math.sqrt(variance) if variance > 0 else 1e-10
-            sharpe = (avg_pnl / std_dev) * math.sqrt(252) if std_dev > 0 else 0
-        else:
-            sharpe = 0
-
-        run.final_capital = capital + sum(pnls)
-        run.total_trades = total_trades
-        run.win_rate = win_rate
-        run.sharpe_ratio = sharpe
-        run.status = "completed"
-        run.completed_at = datetime.now(timezone.utc)
-
-        for bt in trades:
-            self.db.add(bt)
+            raise ValueError(f"BacktestRun {run_id} not found")
+        if run.status == "running":
+            raise ValueError(f"BacktestRun {run_id} is already running")
+        run = await self.engine.execute(run)
         await self.db.flush()
+        return run
+
+    async def delete_run(self, run_id: uuid.UUID) -> bool:
+        trades = await self.db.execute(
+            select(BacktestTrade).where(BacktestTrade.backtest_run_id == run_id)
+        )
+        for t in trades.scalars().all():
+            await self.db.delete(t)
+        run = await self.get_run(run_id)
+        if run:
+            await self.db.delete(run)
+            return True
+        return False
+
+    async def compare_runs(self, run_ids: list[uuid.UUID]) -> list[dict[str, Any]]:
+        results = []
+        for rid in run_ids:
+            run = await self.get_run(rid)
+            if run:
+                results.append({
+                    "id": str(run.id),
+                    "name": run.name,
+                    "strategy_config": run.strategy_config,
+                    "total_trades": run.total_trades,
+                    "win_rate": float(run.win_rate) if run.win_rate else None,
+                    "sharpe_ratio": float(run.sharpe_ratio) if run.sharpe_ratio else None,
+                    "sortino_ratio": float(run.sortino_ratio) if run.sortino_ratio else None,
+                    "calmar_ratio": float(run.calmar_ratio) if run.calmar_ratio else None,
+                    "max_drawdown": float(run.max_drawdown) if run.max_drawdown else None,
+                    "expectancy": float(run.expectancy) if run.expectancy else None,
+                    "profit_factor": float(run.profit_factor) if run.profit_factor else None,
+                    "total_pnl": float(run.total_pnl) if run.total_pnl else None,
+                    "initial_capital": float(run.initial_capital) if run.initial_capital else None,
+                    "final_capital": float(run.final_capital) if run.final_capital else None,
+                    "mode": run.mode,
+                    "status": run.status,
+                })
+        return results

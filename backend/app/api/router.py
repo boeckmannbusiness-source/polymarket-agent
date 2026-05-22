@@ -1,6 +1,6 @@
 from fastapi import APIRouter
 
-from app.api import health, markets, wallets, signals, trades, agents, strategies, portfolio, execution
+from app.api import health, markets, wallets, signals, trades, agents, strategies, portfolio, execution, backtesting
 
 router = APIRouter()
 
@@ -13,3 +13,4 @@ router.include_router(agents.router, prefix="/agents", tags=["agents"])
 router.include_router(strategies.router, prefix="/strategies", tags=["strategies"])
 router.include_router(portfolio.router, prefix="/portfolio", tags=["portfolio"])
 router.include_router(execution.router, prefix="/execution", tags=["execution"])
+router.include_router(backtesting.router, prefix="/backtesting", tags=["backtesting"])
