@@ -1,4 +1,5 @@
 import asyncio
+from datetime import datetime, timezone
 from typing import Any
 
 import httpx
@@ -66,6 +67,7 @@ class PolymarketRESTIngester(BaseIngester):
 
     async def _upsert_market(self, data: dict):
         from app.database import async_session_factory
+        from app.models import MarketEvent
         from app.services.market_service import MarketService
 
         condition_id = data.get("conditionId") or data.get("condition_id")
@@ -87,11 +89,19 @@ class PolymarketRESTIngester(BaseIngester):
 
         resolved = data.get("closed", False)
         resolution = data.get("resolvedOutcome") or data.get("resolution")
+        outcomes_list = outcomes if isinstance(outcomes, list) else []
+        yes_price = None
+        if outcomes_list and len(outcomes_list) == 2:
+            yes_price = (
+                outcomes_list[0].get("price") if isinstance(outcomes_list[0], dict)
+                else outcomes_list[1].get("price") if isinstance(outcomes_list[1], dict)
+                else None
+            )
 
         async with async_session_factory() as db:
             service = MarketService(db)
             try:
-                await service.upsert_market(
+                market = await service.upsert_market(
                     condition_id,
                     slug=slug,
                     title=title,
@@ -105,8 +115,21 @@ class PolymarketRESTIngester(BaseIngester):
                     resolved=bool(resolved),
                     resolution=resolution,
                 )
+                if yes_price is not None:
+                    event = MarketEvent(
+                        market_id=market.id,
+                        event_type="trade",
+                        price=float(yes_price),
+                        size=float(volume) / 100 if volume else 1.0,
+                        maker_address=None,
+                        taker_address=None,
+                        side="buy",
+                        outcome="YES",
+                        timestamp=datetime.now(timezone.utc),
+                    )
+                    db.add(event)
                 await db.commit()
-                logger.debug("market_upserted", condition_id=condition_id[:16])
+                logger.debug("market_upserted", condition_id=condition_id[:16], has_event=yes_price is not None)
             except Exception as e:
                 logger.error("market_upsert_failed", condition_id=condition_id[:16], error=str(e))
                 await db.rollback()
