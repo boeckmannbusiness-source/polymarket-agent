@@ -156,7 +156,7 @@ class PolymarketWSIngester(BaseIngester):
                 self._last_message_time = datetime.now(timezone.utc)
                 data = json.loads(message)
 
-                event_type = data.get("event_type", "unknown")
+                event_type = data.get("type") or data.get("event_type", "unknown")
 
                 if event_type == "last_trade_price":
                     asset_id = data.get("asset_id")
