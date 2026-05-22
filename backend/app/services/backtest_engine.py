@@ -40,13 +40,16 @@ class BacktestEngine:
 
         run.status = "running"
 
-        results = await self.replay_engine.run_multi(
-            strategy_names=strategy_names,
-            start_time=run.start_date,
-            end_time=run.end_date,
-            mode=mode,
-            config=strategy_cfg,
-        )
+        results = {}
+        for name in strategy_names:
+            result = await self.replay_engine.run(
+                strategy_name=name,
+                start_time=run.start_date,
+                end_time=run.end_date,
+                mode=mode,
+                config=strategy_cfg,
+            )
+            results[name] = result
 
         all_trades: list[BacktestTrade] = []
         all_pnls: list[float] = []
