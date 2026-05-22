@@ -100,6 +100,11 @@ async def backfill_events(n_markets: int = 3, n_per_market: int = 3):
     from sqlalchemy import select
     import random
 
+    WHALES = [
+        "0x" + "".join(random.choices("abcdef0123456789", k=40))
+        for _ in range(20)
+    ]
+
     now = datetime.now(timezone.utc)
     async with async_session_factory() as db:
         result = await db.execute(select(Market))
@@ -107,15 +112,18 @@ async def backfill_events(n_markets: int = 3, n_per_market: int = 3):
         markets = all_markets[:n_markets]
         count = 0
         for market in markets:
-            vol = float(market.volume) if market.volume else 1000
+            vol = float(market.volume) if market.volume else 100_000
             for i in range(n_per_market):
                 price = round(random.uniform(0.1, 0.9), 4)
+                is_whale = i % 5 == 0
+                size = random.uniform(600, 5000) if is_whale else random.uniform(10, 200)
                 event = MarketEvent(
                     market_id=market.id, event_type="trade",
-                    event_data={}, price=price, size=vol / n_per_market,
-                    maker_address=None, taker_address=None,
+                    event_data={}, price=price, size=size,
+                    maker_address=random.choice(WHALES) if is_whale else None,
+                    taker_address=None,
                     outcome="YES" if price > 0.5 else "NO",
-                    timestamp=now - timedelta(hours=i * 6),
+                    timestamp=now - timedelta(hours=random.randint(0, 168)),
                 )
                 db.add(event)
                 count += 1

@@ -187,7 +187,7 @@ class ReplayEngine:
                     "wallet": taker or maker or "",
                     "size": size,
                     "side": side,
-                    "wallet_score": 0.5,
+                    "wallet_score": 0.65,
                     "recency_hours": 0,
                 }
 
