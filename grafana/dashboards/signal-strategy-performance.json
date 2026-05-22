@@ -1,0 +1,155 @@
+{
+  "title": "Signal & Strategy Performance",
+  "uid": "signal-strategy-performance",
+  "tags": ["polymarket", "signals", "strategy"],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "60s",
+  "time": { "from": "now-7d", "to": "now" },
+  "timepicker": {},
+  "panels": [
+    {
+      "id": 1,
+      "type": "stat",
+      "title": "Total Signals",
+      "gridPos": { "h": 4, "w": 2, "x": 0, "y": 0 },
+      "targets": [{
+        "datasource": { "type": "postgres", "uid": "${datasource}" },
+        "rawSql": "SELECT COUNT(*) AS count FROM signals WHERE $__timeFilter(generated_at);",
+        "format": "table"
+      }],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "blue", "value": null }] }
+        }
+      }
+    },
+    {
+      "id": 2,
+      "type": "stat",
+      "title": "Active Signals",
+      "gridPos": { "h": 4, "w": 2, "x": 2, "y": 0 },
+      "targets": [{
+        "datasource": { "type": "postgres", "uid": "${datasource}" },
+        "rawSql": "SELECT COUNT(*) AS count FROM signals WHERE is_active = true;",
+        "format": "table"
+      }],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }] }
+        }
+      }
+    },
+    {
+      "id": 3,
+      "type": "stat",
+      "title": "Avg Confidence",
+      "gridPos": { "h": 4, "w": 2, "x": 4, "y": 0 },
+      "targets": [{
+        "datasource": { "type": "postgres", "uid": "${datasource}" },
+        "rawSql": "SELECT COALESCE(AVG(confidence), 0) AS avg_confidence FROM signals WHERE $__timeFilter(generated_at);",
+        "format": "table"
+      }],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }] }
+        }
+      }
+    },
+    {
+      "id": 4,
+      "type": "stat",
+      "title": "Signal Directions",
+      "gridPos": { "h": 4, "w": 2, "x": 6, "y": 0 },
+      "targets": [{
+        "datasource": { "type": "postgres", "uid": "${datasource}" },
+        "rawSql": "SELECT direction AS \"Direction\", COUNT(*) AS \"Count\" FROM signals WHERE $__timeFilter(generated_at) GROUP BY direction;",
+        "format": "table"
+      }]
+    },
+    {
+      "id": 5,
+      "type": "table",
+      "title": "Strategy Performance Summary",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 4 },
+      "targets": [{
+        "datasource": { "type": "postgres", "uid": "${datasource}" },
+        "rawSql": "SELECT strategy_name AS \"Strategy\", total_signals AS \"Signals\", win_rate AS \"Win Rate\", sharpe_ratio AS \"Sharpe\", max_drawdown AS \"Max DD\", avg_confidence AS \"Avg Conf\", total_pnl AS \"Total PnL\" FROM strategy_performances ORDER BY sharpe_ratio DESC NULLS LAST;",
+        "format": "table"
+      }]
+    },
+    {
+      "id": 6,
+      "type": "timeseries",
+      "title": "Signal Confidence Over Time",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 12 },
+      "targets": [{
+        "datasource": { "type": "postgres", "uid": "${datasource}" },
+        "rawSql": "SELECT $__timeGroup(generated_at, '1h') AS time, AVG(confidence) AS avg_confidence FROM signals WHERE $__timeFilter(generated_at) GROUP BY 1 ORDER BY 1;",
+        "format": "table"
+      }],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "custom": { "displayMode": "table" }
+        }
+      }
+    },
+    {
+      "id": 7,
+      "type": "timeseries",
+      "title": "Signal Outcome PnL at Close (1d buckets)",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 20 },
+      "targets": [{
+        "datasource": { "type": "postgres", "uid": "${datasource}" },
+        "rawSql": "SELECT $__timeGroup(calculated_at, '1d') AS time, SUM(COALESCE(pnl_close, 0)) AS sum_pnl_close, SUM(COALESCE(realized_pnl, 0)) AS sum_realized_pnl FROM signal_outcomes WHERE $__timeFilter(calculated_at) GROUP BY 1 ORDER BY 1;",
+        "format": "table"
+      }],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": { "displayMode": "table" }
+        }
+      }
+    },
+    {
+      "id": 8,
+      "type": "stat",
+      "title": "Signals with Outcomes",
+      "gridPos": { "h": 4, "w": 2, "x": 8, "y": 0 },
+      "targets": [{
+        "datasource": { "type": "postgres", "uid": "${datasource}" },
+        "rawSql": "SELECT COUNT(*) AS count FROM signal_outcomes WHERE $__timeFilter(calculated_at);",
+        "format": "table"
+      }],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "blue", "value": null }] }
+        }
+      }
+    },
+    {
+      "id": 9,
+      "type": "stat",
+      "title": "Avg PnL (Close)",
+      "gridPos": { "h": 4, "w": 2, "x": 10, "y": 0 },
+      "targets": [{
+        "datasource": { "type": "postgres", "uid": "${datasource}" },
+        "rawSql": "SELECT COALESCE(AVG(pnl_close), 0) AS avg_pnl FROM signal_outcomes WHERE $__timeFilter(calculated_at);",
+        "format": "table"
+      }],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "decimals": 4,
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }] }
+        }
+      }
+    }
+  ]
+}

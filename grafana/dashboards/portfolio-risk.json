@@ -1,0 +1,251 @@
+{
+  "title": "Portfolio & Risk",
+  "uid": "portfolio-risk",
+  "tags": ["polymarket", "portfolio", "risk"],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "60s",
+  "time": { "from": "now-7d", "to": "now" },
+  "timepicker": {},
+  "panels": [
+    {
+      "id": 1,
+      "type": "stat",
+      "title": "Portfolio Value",
+      "gridPos": { "h": 4, "w": 3, "x": 0, "y": 0 },
+      "targets": [{
+        "datasource": { "type": "postgres", "uid": "${datasource}" },
+        "rawSql": "SELECT portfolio_value AS \"Portfolio Value\" FROM portfolio_snapshots ORDER BY timestamp DESC LIMIT 1;",
+        "format": "table"
+      }],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "decimals": 2,
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }] }
+        }
+      }
+    },
+    {
+      "id": 2,
+      "type": "stat",
+      "title": "Drawdown",
+      "gridPos": { "h": 4, "w": 3, "x": 3, "y": 0 },
+      "targets": [{
+        "datasource": { "type": "postgres", "uid": "${datasource}" },
+        "rawSql": "SELECT drawdown AS \"Drawdown\" FROM portfolio_snapshots ORDER BY timestamp DESC LIMIT 1;",
+        "format": "table"
+      }],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "decimals": 4,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "orange", "value": -0.05 },
+              { "color": "red", "value": -0.1 }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": 3,
+      "type": "stat",
+      "title": "Open Positions",
+      "gridPos": { "h": 4, "w": 3, "x": 6, "y": 0 },
+      "targets": [{
+        "datasource": { "type": "postgres", "uid": "${datasource}" },
+        "rawSql": "SELECT COUNT(*) AS \"Open\" FROM positions WHERE status = 'OPEN';",
+        "format": "table"
+      }],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "blue", "value": null }] }
+        }
+      }
+    },
+    {
+      "id": 4,
+      "type": "stat",
+      "title": "Unrealized P&L",
+      "gridPos": { "h": 4, "w": 3, "x": 9, "y": 0 },
+      "targets": [{
+        "datasource": { "type": "postgres", "uid": "${datasource}" },
+        "rawSql": "SELECT COALESCE(SUM(unrealized_pnl), 0) AS \"Unrealized P&L\" FROM positions WHERE status = 'OPEN';",
+        "format": "table"
+      }],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "decimals": 2,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "red", "value": 0 }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": 5,
+      "type": "timeseries",
+      "title": "Portfolio Value Over Time",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 4 },
+      "targets": [{
+        "datasource": { "type": "postgres", "uid": "${datasource}" },
+        "rawSql": "SELECT $__timeGroup(timestamp, '1h') AS time, AVG(portfolio_value) AS portfolio_value, AVG(total_unrealized_pnl) AS unrealized FROM portfolio_snapshots WHERE $__timeFilter(timestamp) GROUP BY 1 ORDER BY 1;",
+        "format": "table"
+      }],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": { "displayMode": "table" }
+        }
+      }
+    },
+    {
+      "id": 6,
+      "type": "timeseries",
+      "title": "Exposure & Drawdown",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 12 },
+      "targets": [{
+        "datasource": { "type": "postgres", "uid": "${datasource}" },
+        "rawSql": "SELECT $__timeGroup(timestamp, '1h') AS time, AVG(total_exposure) AS total_exposure, AVG(drawdown) AS drawdown FROM portfolio_snapshots WHERE $__timeFilter(timestamp) GROUP BY 1 ORDER BY 1;",
+        "format": "table"
+      }],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": { "displayMode": "table" }
+        }
+      }
+    },
+    {
+      "id": 7,
+      "type": "table",
+      "title": "Open Positions",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 20 },
+      "targets": [{
+        "datasource": { "type": "postgres", "uid": "${datasource}" },
+        "rawSql": "SELECT market_condition_id AS \"Market\", direction AS \"Dir\", size AS \"Size\", entry_price AS \"Entry\", current_price AS \"Current\", unrealized_pnl AS \"Unrealized\", strategy_name AS \"Strategy\" FROM positions WHERE status = 'OPEN' ORDER BY opened_at DESC;",
+        "format": "table"
+      }]
+    },
+    {
+      "id": 8,
+      "type": "table",
+      "title": "Recent Trades",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 28 },
+      "targets": [{
+        "datasource": { "type": "postgres", "uid": "${datasource}" },
+        "rawSql": "SELECT side AS \"Side\", outcome AS \"Outcome\", size AS \"Size\", price AS \"Price\", pnl AS \"PnL\", pnl_percent AS \"PnL %\", status AS \"Status\", created_at AS \"Created\" FROM trades WHERE $__timeFilter(created_at) ORDER BY created_at DESC LIMIT 50;",
+        "format": "table"
+      }]
+    },
+    {
+      "id": 9,
+      "type": "table",
+      "title": "Market Correlations",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 36 },
+      "targets": [{
+        "datasource": { "type": "postgres", "uid": "${datasource}" },
+        "rawSql": "SELECT mc.market_a_id AS \"Market A\", mc.market_b_id AS \"Market B\", mc.correlation_coefficient AS \"Correlation\", mc.sample_size AS \"Samples\", mc.window_hours AS \"Window\" FROM market_correlations mc ORDER BY ABS(mc.correlation_coefficient) DESC LIMIT 25;",
+        "format": "table"
+      }]
+    },
+    {
+      "id": 10,
+      "type": "stat",
+      "title": "Kill Switch",
+      "gridPos": { "h": 4, "w": 3, "x": 0, "y": 44 },
+      "targets": [{
+        "datasource": { "type": "postgres", "uid": "${datasource}" },
+        "rawSql": "SELECT kill_switch_active AS \"Kill Switch\" FROM safety_state ORDER BY created_at DESC LIMIT 1;",
+        "format": "table"
+      }],
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "red", "value": 0.5 }
+            ]
+          },
+          "mappings": [
+            { "type": "value", "value": "false", "text": "OFF", "color": "green" },
+            { "type": "value", "value": "true", "text": "ACTIVE", "color": "red" }
+          ]
+        }
+      }
+    },
+    {
+      "id": 11,
+      "type": "stat",
+      "title": "Circuit Breaker",
+      "gridPos": { "h": 4, "w": 3, "x": 3, "y": 44 },
+      "targets": [{
+        "datasource": { "type": "postgres", "uid": "${datasource}" },
+        "rawSql": "SELECT circuit_breaker_active AS \"Circuit Breaker\" FROM safety_state ORDER BY created_at DESC LIMIT 1;",
+        "format": "table"
+      }],
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "red", "value": 0.5 }
+            ]
+          },
+          "mappings": [
+            { "type": "value", "value": "false", "text": "OFF", "color": "green" },
+            { "type": "value", "value": "true", "text": "ACTIVE", "color": "red" }
+          ]
+        }
+      }
+    },
+    {
+      "id": 12,
+      "type": "stat",
+      "title": "Daily P&L",
+      "gridPos": { "h": 4, "w": 3, "x": 6, "y": 44 },
+      "targets": [{
+        "datasource": { "type": "postgres", "uid": "${datasource}" },
+        "rawSql": "SELECT daily_pnl AS \"Daily P&L\" FROM safety_state ORDER BY created_at DESC LIMIT 1;",
+        "format": "table"
+      }],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "decimals": 2,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "red", "value": 0 }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": 13,
+      "type": "table",
+      "title": "Quarantined Strategies",
+      "gridPos": { "h": 4, "w": 6, "x": 9, "y": 44 },
+      "targets": [{
+        "datasource": { "type": "postgres", "uid": "${datasource}" },
+        "rawSql": "SELECT quarantined_strategies AS \"Quarantined\" FROM safety_state WHERE quarantined_strategies IS NOT NULL AND json_array_length(quarantined_strategies::json) > 0 ORDER BY created_at DESC LIMIT 1;",
+        "format": "table"
+      }]
+    }
+  ]
+}

@@ -1,0 +1,159 @@
+{
+  "title": "Market Intelligence",
+  "uid": "market-intelligence",
+  "tags": ["polymarket", "market-intelligence"],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "60s",
+  "time": { "from": "now-24h", "to": "now" },
+  "timepicker": {},
+  "panels": [
+    {
+      "id": 1,
+      "type": "stat",
+      "title": "Active Markets",
+      "gridPos": { "h": 4, "w": 3, "x": 0, "y": 0 },
+      "targets": [{
+        "datasource": { "type": "postgres", "uid": "${datasource}" },
+        "rawSql": "SELECT COUNT(*) AS count FROM markets WHERE resolved = false AND volume > 0;",
+        "format": "table",
+        "refId": "A"
+      }],
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false } },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }] }
+        }
+      }
+    },
+    {
+      "id": 2,
+      "type": "stat",
+      "title": "Total Volume (ALL)",
+      "gridPos": { "h": 4, "w": 3, "x": 3, "y": 0 },
+      "targets": [{
+        "datasource": { "type": "postgres", "uid": "${datasource}" },
+        "rawSql": "SELECT COALESCE(SUM(volume), 0) AS total FROM markets;",
+        "format": "table",
+        "refId": "A"
+      }],
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false } },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "decimals": 2,
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }] }
+        }
+      }
+    },
+    {
+      "id": 3,
+      "type": "stat",
+      "title": "Total Liquidity",
+      "gridPos": { "h": 4, "w": 3, "x": 6, "y": 0 },
+      "targets": [{
+        "datasource": { "type": "postgres", "uid": "${datasource}" },
+        "rawSql": "SELECT COALESCE(SUM(liquidity), 0) AS total FROM markets;",
+        "format": "table",
+        "refId": "A"
+      }],
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false } },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "decimals": 2,
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }] }
+        }
+      }
+    },
+    {
+      "id": 4,
+      "type": "stat",
+      "title": "Resolved Markets",
+      "gridPos": { "h": 4, "w": 3, "x": 9, "y": 0 },
+      "targets": [{
+        "datasource": { "type": "postgres", "uid": "${datasource}" },
+        "rawSql": "SELECT COUNT(*) AS count FROM markets WHERE resolved = true;",
+        "format": "table",
+        "refId": "A"
+      }],
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false } },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }] }
+        }
+      }
+    },
+    {
+      "id": 5,
+      "type": "timeseries",
+      "title": "Market Snapshots — Spread & Volatility (30m avg)",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 4 },
+      "targets": [
+        {
+          "datasource": { "type": "postgres", "uid": "${datasource}" },
+          "rawSql": "SELECT $__timeGroup(timestamp, '30m') AS time, AVG(spread) AS avg_spread, AVG(volatility) AS avg_volatility FROM market_state_snapshots WHERE $__timeFilter(timestamp) GROUP BY 1 ORDER BY 1;",
+          "format": "table",
+          "refId": "A"
+        }
+      ],
+      "options": { "tooltip": { "mode": "multi" }, "legend": { "showLegend": true, "displayMode": "list" } },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": { "displayMode": "table" }
+        }
+      }
+    },
+    {
+      "id": 6,
+      "type": "timeseries",
+      "title": "Whale Pressure & Orderbook Imbalance",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 12 },
+      "targets": [
+        {
+          "datasource": { "type": "postgres", "uid": "${datasource}" },
+          "rawSql": "SELECT $__timeGroup(timestamp, '30m') AS time, AVG(whale_pressure) AS whale_pressure, AVG(orderbook_imbalance) AS orderbook_imbalance FROM market_state_snapshots WHERE $__timeFilter(timestamp) GROUP BY 1 ORDER BY 1;",
+          "format": "table",
+          "refId": "A"
+        }
+      ],
+      "options": { "tooltip": { "mode": "multi" }, "legend": { "showLegend": true, "displayMode": "list" } },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": { "displayMode": "table" }
+        }
+      }
+    },
+    {
+      "id": 7,
+      "type": "table",
+      "title": "Top Markets by Volume",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 20 },
+      "targets": [{
+        "datasource": { "type": "postgres", "uid": "${datasource}" },
+        "rawSql": "SELECT title AS \"Market\", volume AS \"Volume\", liquidity AS \"Liquidity\", resolved AS \"Resolved\" FROM markets WHERE volume > 0 ORDER BY volume DESC LIMIT 25;",
+        "format": "table",
+        "refId": "A"
+      }],
+      "options": { "footer": { "show": false }, "frameIndex": 0, "showHeader": true, "sortBy": [] }
+    },
+    {
+      "id": 8,
+      "type": "table",
+      "title": "Top Whales by Volume",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 28 },
+      "targets": [{
+        "datasource": { "type": "postgres", "uid": "${datasource}" },
+        "rawSql": "SELECT address AS \"Address\", total_volume AS \"Total Volume\", total_trades AS \"Trades\", win_rate AS \"Win Rate\", realized_pnl AS \"Realized PnL\" FROM wallets ORDER BY total_volume DESC LIMIT 25;",
+        "format": "table",
+        "refId": "A"
+      }],
+      "options": { "footer": { "show": false }, "frameIndex": 0, "showHeader": true, "sortBy": [] }
+    }
+  ]
+}
