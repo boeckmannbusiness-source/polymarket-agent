@@ -206,7 +206,10 @@ async def db_counts():
 async def debug_ws_status():
     if _ws_ingester is None:
         return {"error": "ws_ingester_not_initialized"}
-    return _ws_ingester.stats
+    try:
+        return _ws_ingester.stats
+    except Exception as e:
+        return {"error": str(e), "ingester_initialized": True}
 
 
 @app.get("/debug/ws-mappings")
