@@ -110,10 +110,10 @@ async def backfill_events():
                 price = round(random.uniform(0.1, 0.9), 4)
                 vol = float(market.volume) if market.volume else 1000
                 event = MarketEvent(
-                    market_id=market.id, event_type="trade", price=price,
+                    market_id=market.id, event_type="trade",
+                    event_data={}, price=price,
                     size=vol / 20,
                     maker_address=None, taker_address=None,
-                    side="buy" if i < 10 else "sell",
                     outcome="YES" if price > 0.5 else "NO",
                     timestamp=now - timedelta(hours=i * 6),
                 )

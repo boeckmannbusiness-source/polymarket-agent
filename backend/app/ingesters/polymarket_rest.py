@@ -119,11 +119,11 @@ class PolymarketRESTIngester(BaseIngester):
                     event = MarketEvent(
                         market_id=market.id,
                         event_type="trade",
+                        event_data={},
                         price=float(yes_price),
                         size=float(volume) / 100 if volume else 1.0,
                         maker_address=None,
                         taker_address=None,
-                        side="buy",
                         outcome="YES",
                         timestamp=datetime.now(timezone.utc),
                     )
