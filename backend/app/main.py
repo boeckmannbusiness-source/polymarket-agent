@@ -94,33 +94,37 @@ async def system_status():
 
 @app.post("/debug/backfill-events")
 async def backfill_events():
-    from app.database import async_session_factory
-    from app.models import Market, MarketEvent
-    from datetime import datetime, timezone, timedelta
-    from sqlalchemy import select
-    import random
+    import traceback
+    try:
+        from app.database import async_session_factory
+        from app.models import Market, MarketEvent
+        from datetime import datetime, timezone, timedelta
+        from sqlalchemy import select
+        import random
 
-    now = datetime.now(timezone.utc)
-    async with async_session_factory() as db:
-        result = await db.execute(select(Market))
-        markets = list(result.scalars().all())
-        count = 0
-        for market in markets[:3]:
-            for i in range(3):
-                price = round(random.uniform(0.1, 0.9), 4)
-                vol = float(market.volume) if market.volume else 1000
-                event = MarketEvent(
-                    market_id=market.id, event_type="trade",
-                    event_data={}, price=price,
-                    size=vol / 20,
-                    maker_address=None, taker_address=None,
-                    outcome="YES" if price > 0.5 else "NO",
-                    timestamp=now - timedelta(hours=i * 6),
-                )
-                db.add(event)
-                count += 1
-        await db.commit()
-        return {"events_created": count}
+        now = datetime.now(timezone.utc)
+        async with async_session_factory() as db:
+            result = await db.execute(select(Market))
+            markets = list(result.scalars().all())
+            count = 0
+            for market in markets[:3]:
+                for i in range(3):
+                    price = round(random.uniform(0.1, 0.9), 4)
+                    vol = float(market.volume) if market.volume else 1000
+                    event = MarketEvent(
+                        market_id=market.id, event_type="trade",
+                        event_data={}, price=price,
+                        size=vol / 20,
+                        maker_address=None, taker_address=None,
+                        outcome="YES" if price > 0.5 else "NO",
+                        timestamp=now - timedelta(hours=i * 6),
+                    )
+                    db.add(event)
+                    count += 1
+            await db.commit()
+            return {"events_created": count}
+    except Exception as e:
+        return {"error": str(e), "traceback": traceback.format_exc()}
 
 
 @app.get("/debug/db-counts")
