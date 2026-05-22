@@ -7,6 +7,14 @@ from .trade_service import TradeService
 from .backtest_service import BacktestService
 from .notification_service import NotificationService
 from .agent_log_service import AgentLogService
+from .signal_evaluation_service import SignalEvaluationService
+from .market_snapshot_service import MarketStateSnapshotService
+from .strategy_service import StrategyService
+from .portfolio_service import PortfolioService
+from .strategy_ranking_service import StrategyRankingService
+from .execution_simulator import ExecutionSimulator
+from .regime_service import RegimeService
+from .safety_service import SafetyService
 
 __all__ = [
     "MarketService",
@@ -18,4 +26,12 @@ __all__ = [
     "BacktestService",
     "NotificationService",
     "AgentLogService",
+    "SignalEvaluationService",
+    "MarketStateSnapshotService",
+    "StrategyService",
+    "PortfolioService",
+    "StrategyRankingService",
+    "ExecutionSimulator",
+    "RegimeService",
+    "SafetyService",
 ]
