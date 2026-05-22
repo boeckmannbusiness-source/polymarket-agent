@@ -1,3 +1,4 @@
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import DeclarativeBase
 
@@ -36,3 +37,11 @@ async def get_db() -> AsyncSession:
 async def init_db():
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+        await conn.execute(text("""
+            ALTER TABLE backtest_runs
+            ADD COLUMN IF NOT EXISTS sortino_ratio NUMERIC(12, 6),
+            ADD COLUMN IF NOT EXISTS calmar_ratio NUMERIC(12, 6),
+            ADD COLUMN IF NOT EXISTS total_pnl NUMERIC(24, 8),
+            ADD COLUMN IF NOT EXISTS mode VARCHAR(32),
+            ADD COLUMN IF NOT EXISTS error_message TEXT
+        """))
