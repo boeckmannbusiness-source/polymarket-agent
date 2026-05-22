@@ -383,6 +383,25 @@ async def debug_trade_forensics(trade_id: int):
         }
 
 
+@app.get("/debug/bridge-stats")
+async def debug_bridge_stats():
+    global _bridge
+    if _bridge is None:
+        return {"error": "bridge not initialized"}
+    return _bridge.stats
+
+
+@app.get("/debug/redis-stream")
+async def debug_redis_stream():
+    from app.redis import get_redis
+    r = await get_redis()
+    try:
+        info = await r.xinfo_stream("market:data")
+        return {"stream": "market:data", "info": info}
+    except Exception as e:
+        return {"stream": "market:data", "error": str(e)}
+
+
 # Import and include routers
 from app.api.router import router as api_router
 app.include_router(api_router, prefix="/api/v1")
