@@ -14,8 +14,13 @@ from app.agents.orchestrator import Orchestrator
 from app.services.event_bridge import EventPersistenceBridge
 
 
+_ws_ingester: PolymarketWSIngester | None = None
+_bridge: EventPersistenceBridge | None = None
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    global _ws_ingester, _bridge
     setup_logging()
     logger.info("starting_up", env=settings.APP_ENV, mode=settings.TRADING_MODE)
     try:
@@ -25,8 +30,10 @@ async def lifespan(app: FastAPI):
         logger.warning("database_init_skipped", error=str(e))
 
     rest_ingester = PolymarketRESTIngester(poll_interval=60)
-    ws_ingester = PolymarketWSIngester()
-    bridge = EventPersistenceBridge()
+    _ws_ingester = PolymarketWSIngester()
+    ws_ingester = _ws_ingester
+    _bridge = EventPersistenceBridge()
+    bridge = _bridge
     orchestrator = Orchestrator()
 
     bg_tasks = []
@@ -193,6 +200,179 @@ async def db_counts():
             except Exception as e:
                 counts[name] = str(e)
         return counts
+
+
+@app.get("/debug/ws-status")
+async def debug_ws_status():
+    if _ws_ingester is None:
+        return {"error": "ws_ingester_not_initialized"}
+    return _ws_ingester.stats
+
+
+@app.get("/debug/ws-mappings")
+async def debug_ws_mappings():
+    from app.database import async_session_factory
+    from sqlalchemy import select
+    from app.models import Market
+
+    async with async_session_factory() as db:
+        result = await db.execute(
+            select(Market.condition_id, Market.clob_token_ids, Market.slug, Market.title, Market.resolved)
+            .where(Market.clob_token_ids.isnot(None))
+            .limit(200)
+        )
+        rows = result.all()
+    mappings = []
+    orphans = []
+    for condition_id, token_ids, slug, title, resolved in rows:
+        ids = [t for t in (token_ids or []) if t]
+        if not ids:
+            continue
+        for tid in ids:
+            mappings.append({
+                "asset_id": tid,
+                "condition_id": condition_id,
+                "slug": slug,
+                "title": (title or "")[:60],
+                "resolved": resolved,
+            })
+    async with async_session_factory() as db:
+        all_events = await db.execute(
+            select(MarketEvent.event_data)
+            .where(MarketEvent.event_data["asset_id"].as_string().isnot(None))
+            .limit(1000)
+        )
+        seen_assets = set()
+        for row in all_events:
+            aid = row[0].get("asset_id") if row[0] else None
+            if aid:
+                seen_assets.add(aid)
+    mapped_assets = {m["asset_id"] for m in mappings}
+    for aid in seen_assets:
+        if aid not in mapped_assets:
+            orphans.append(aid)
+    return {
+        "total_mappings": len(mappings),
+        "sample": mappings[:50],
+        "orphan_asset_ids": orphans[:50],
+        "orphan_count": len(orphans),
+    }
+
+
+@app.get("/debug/data-quality")
+async def debug_data_quality():
+    from app.database import async_session_factory
+    from sqlalchemy import select, func
+    from app.models import Market, MarketEvent
+    from datetime import datetime, timezone, timedelta
+
+    async with async_session_factory() as db:
+        total_events = await db.execute(select(func.count()).select_from(MarketEvent))
+        total_events = total_events.scalar() or 0
+
+        total_markets = await db.execute(select(func.count()).select_from(Market))
+        total_markets = total_markets.scalar() or 0
+
+        resolved = await db.execute(
+            select(func.count()).select_from(Market).where(Market.resolved == True)
+        )
+        resolved = resolved.scalar() or 0
+
+        with_ids = await db.execute(
+            select(func.count()).select_from(Market).where(Market.clob_token_ids.isnot(None))
+        )
+        with_ids = with_ids.scalar() or 0
+
+        from datetime import timedelta
+        cutoff = datetime.now(timezone.utc) - timedelta(hours=24)
+        events_24h = await db.execute(
+            select(func.count()).select_from(MarketEvent)
+            .where(MarketEvent.timestamp >= cutoff)
+        )
+        events_24h = events_24h.scalar() or 0
+
+        orphan_events = await db.execute(
+            select(func.count()).select_from(MarketEvent)
+            .where(MarketEvent.market_id.is_(None))
+        )
+        orphan_events = orphan_events.scalar() or 0
+
+        return {
+            "total_market_events": total_events,
+            "total_markets": total_markets,
+            "markets_with_clob_ids": with_ids,
+            "resolved_markets": resolved,
+            "events_last_24h": events_24h,
+            "events_per_minute_24h": round(events_24h / 1440, 2) if events_24h else 0,
+            "orphan_events": orphan_events,
+            "mapping_coverage_pct": round(with_ids / total_markets * 100, 1) if total_markets else 0,
+        }
+
+
+@app.get("/debug/trade/{trade_id}")
+async def debug_trade_forensics(trade_id: int):
+    from app.database import async_session_factory
+    from app.models import BacktestTrade, MarketEvent, Market
+    from sqlalchemy import select
+    from datetime import timedelta
+
+    async with async_session_factory() as db:
+        trade = await db.execute(select(BacktestTrade).where(BacktestTrade.id == trade_id))
+        trade = trade.scalar_one_or_none()
+        if not trade:
+            from fastapi import HTTPException
+            raise HTTPException(status_code=404, detail="Trade not found")
+
+        market = None
+        raw_events = []
+        if trade.market_id:
+            market_row = await db.execute(select(Market).where(Market.id == trade.market_id))
+            market = market_row.scalar_one_or_none()
+            events = await db.execute(
+                select(MarketEvent).where(MarketEvent.market_id == trade.market_id)
+                .where(MarketEvent.timestamp.between(
+                    trade.entry_timestamp - timedelta(hours=1),
+                    (trade.exit_timestamp or trade.entry_timestamp) + timedelta(hours=1),
+                ))
+                .order_by(MarketEvent.timestamp)
+                .limit(500)
+            )
+            raw_events = [
+                {
+                    "id": e.id,
+                    "event_type": e.event_type,
+                    "price": float(e.price) if e.price else None,
+                    "size": float(e.size) if e.size else None,
+                    "maker": e.maker_address,
+                    "outcome": e.outcome,
+                    "timestamp": e.timestamp.isoformat() if e.timestamp else None,
+                }
+                for e in events.scalars().all()
+            ]
+
+        return {
+            "trade": {
+                "id": trade.id,
+                "side": trade.side,
+                "outcome": trade.outcome,
+                "entry_price": float(trade.entry_price) if trade.entry_price else None,
+                "exit_price": float(trade.exit_price) if trade.exit_price else None,
+                "size": float(trade.size),
+                "pnl": float(trade.pnl) if trade.pnl else None,
+                "entry_timestamp": trade.entry_timestamp.isoformat() if trade.entry_timestamp else None,
+                "exit_timestamp": trade.exit_timestamp.isoformat() if trade.exit_timestamp else None,
+                "signal_type": trade.signal_type,
+                "extra_data": trade.extra_data,
+            },
+            "market": {
+                "id": str(market.id) if market else None,
+                "condition_id": market.condition_id if market else None,
+                "slug": market.slug if market else None,
+                "title": market.title if market else None,
+            } if market else None,
+            "surrounding_events": raw_events[:100],
+            "event_count": len(raw_events),
+        }
 
 
 # Import and include routers

@@ -14,6 +14,9 @@ class EventPersistenceBridge:
         self.running = False
         self._tasks: list[asyncio.Task] = []
         self._processed = 0
+        self._persisted_count = 0
+        self._failed_count = 0
+        self._dlq: list[dict] = []
 
     async def start(self):
         self.running = True
@@ -67,26 +70,30 @@ class EventPersistenceBridge:
             await self._persist_market_metadata(data)
 
     async def _persist_trade_event(self, data: dict):
-        async with async_session_factory() as db:
-            try:
-                condition_id = data.get("condition_id") or data.get("conditionId")
-                market_id = None
-                if condition_id:
+        condition_id = data.get("condition_id") or data.get("conditionId")
+        market_id = None
+        if condition_id:
+            async with async_session_factory() as db:
+                try:
                     result = await db.execute(
                         select(Market).where(Market.condition_id == condition_id)
                     )
                     m = result.scalar_one_or_none()
                     if m:
                         market_id = m.id
+                except Exception:
+                    pass
 
-                ts_str = data.get("timestamp")
-                ts = None
-                if ts_str:
-                    try:
-                        ts = datetime.fromisoformat(ts_str.replace("Z", "+00:00"))
-                    except (ValueError, AttributeError):
-                        ts = datetime.now(timezone.utc)
+        ts_str = data.get("timestamp")
+        ts = None
+        if ts_str:
+            try:
+                ts = datetime.fromisoformat(str(ts_str).replace("Z", "+00:00"))
+            except (ValueError, AttributeError):
+                ts = datetime.now(timezone.utc)
 
+        async with async_session_factory() as db:
+            try:
                 event = MarketEvent(
                     market_id=market_id,
                     event_type="trade",
@@ -95,16 +102,18 @@ class EventPersistenceBridge:
                     size=float(data["size"]) if data.get("size") else None,
                     maker_address=data.get("maker"),
                     taker_address=data.get("taker"),
-                    side=data.get("side", "buy"),
                     outcome=data.get("outcome"),
                     transaction_hash=data.get("transaction_hash"),
                     timestamp=ts or datetime.now(timezone.utc),
                 )
                 db.add(event)
                 await db.commit()
+                self._persisted_count += 1
             except Exception as e:
                 await db.rollback()
-                logger.debug("trade_event_persist_skipped", error=str(e))
+                self._failed_count += 1
+                logger.debug("trade_event_persist_failed", error=str(e))
+                await self._dead_letter("trade", data, str(e))
 
     async def _persist_market_metadata(self, data: dict):
         async with async_session_factory() as db:
@@ -131,6 +140,28 @@ class EventPersistenceBridge:
                 await db.rollback()
                 logger.debug("market_metadata_persist_skipped", error=str(e))
 
+    async def _dead_letter(self, event_type: str, data: dict, error: str):
+        entry = {
+            "event_type": event_type,
+            "error": error,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "data": data,
+        }
+        self._dlq.append(entry)
+        if len(self._dlq) > 1000:
+            self._dlq = self._dlq[-500:]
+        try:
+            from app.redis import get_redis
+            r = await get_redis()
+            await r.xadd("market:data:dlq", entry, maxlen=5000)
+        except Exception:
+            pass
+
     @property
     def stats(self):
-        return {"events_processed": self._processed}
+        return {
+            "events_processed": self._processed,
+            "persisted_count": self._persisted_count,
+            "failed_count": self._failed_count,
+            "dlq_size": len(self._dlq),
+        }
