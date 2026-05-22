@@ -243,7 +243,12 @@ class ReplayEngine:
             if po.entry_price is not None and ctx.current_price is not None:
                 po.evaluate(ts, ctx.current_price, po.signal.signal)
                 po.signal.outcome_close = po.signal.outcome_1h or po.signal.outcome_15m or "TIMEOUT"
-                po.signal.probability_close = po.signal.probability_1h or po.signal.probability_15m or ctx.current_price
+                prob_close = po.signal.probability_1h or po.signal.probability_15m or ctx.current_price
+                po.signal.probability_close = prob_close
+                price_change = prob_close - po.entry_price
+                if po.signal.signal == "BUY_NO":
+                    price_change = -price_change
+                po.signal.pnl_close = price_change
 
         return result
 
