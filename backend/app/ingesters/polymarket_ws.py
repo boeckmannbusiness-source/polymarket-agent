@@ -143,7 +143,7 @@ class PolymarketWSIngester(BaseIngester):
     async def _message_loop(self):
         while self.running:
             try:
-                if self.ws is None or self.ws.closed:
+                if self.ws is None or getattr(self.ws, 'close_code', None) is not None:
                     self._reconnect_count += 1
                     logger.warning("ws_not_connected, reconnecting...", reconnect=self._reconnect_count)
                     await asyncio.sleep(5)
@@ -217,8 +217,14 @@ class PolymarketWSIngester(BaseIngester):
 
     @property
     def stats(self) -> dict:
+        connected = False
+        if self.ws is not None:
+            try:
+                connected = not self.ws.close_code
+            except Exception:
+                connected = False
         return {
-            "connected": self.ws is not None and not self.ws.closed,
+            "connected": connected,
             "subscribed_assets": len(self._subscribed_assets),
             "mapped_conditions": len(self._condition_to_asset),
             "mapped_assets": len(self._asset_to_condition),
