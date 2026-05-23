@@ -4,8 +4,6 @@ from .whale_service_worker import WhaleTrackerWorker
 from .signal_service import SignalService
 from .risk_service import RiskService
 from .trade_service import TradeService
-from .backtest_service import BacktestService
-from .backtest_engine import BacktestEngine
 from .notification_service import NotificationService
 from .agent_log_service import AgentLogService
 from .signal_evaluation_service import SignalEvaluationService
@@ -25,8 +23,6 @@ __all__ = [
     "SignalService",
     "RiskService",
     "TradeService",
-    "BacktestService",
-    "BacktestEngine",
     "NotificationService",
     "AgentLogService",
     "SignalEvaluationService",

@@ -1,10 +1,14 @@
+from __future__ import annotations
 from datetime import datetime, timedelta, timezone
+from typing import TYPE_CHECKING
 
 from sqlalchemy import select, desc, and_
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import Signal, MarketEvent, SignalOutcome
-from app.replay.engine import ReplayedSignal
+
+if TYPE_CHECKING:
+    from app.replay.engine import ReplayedSignal
 
 
 class SignalEvaluationService:
