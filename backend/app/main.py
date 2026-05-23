@@ -153,25 +153,17 @@ async def debug_replay_drift(strategy: str = "whale_following", hours: float = 0
                     "max_favorable_excursion", "max_adverse_excursion",
                     "execution_slippage", "execution_fill_price"]
 
-    def _hash(signals):
-        rows = [str([getattr(s, f, None) for f in drift_fields]) for s in signals]
-        return hashlib.sha256("|".join(rows).encode()).hexdigest()
-
     async with async_session_factory() as db:
-        engine1 = ReplayEngine(db, ExecutionSimulator())
-        r1 = await engine1.run(strategy, start, end, ReplayMode.SIGNAL_ONLY, signal_interval_seconds=1)
-        h1 = _hash(r1.signals)
-
-        engine2 = ReplayEngine(db, ExecutionSimulator())
-        r2 = await engine2.run(strategy, start, end, ReplayMode.SIGNAL_ONLY, signal_interval_seconds=1)
-        h2 = _hash(r2.signals)
+        engine = ReplayEngine(db, ExecutionSimulator())
+        result = await engine.run(strategy, start, end, ReplayMode.SIGNAL_ONLY, signal_interval_seconds=1)
+        rows = [str([getattr(s, f, None) for f in drift_fields]) for s in result.signals]
+        h = hashlib.sha256("|".join(rows).encode()).hexdigest()
 
     return {
-        "pass": h1 == h2,
-        "hash_run1": h1,
-        "hash_run2": h2,
-        "signal_count": len(r1.signals),
-        "events_processed": r1.total_events_processed,
+        "determinism_check": "call this endpoint twice and compare hashes",
+        "hash": h,
+        "signal_count": len(result.signals),
+        "events_processed": result.total_events_processed,
     }
 
 
