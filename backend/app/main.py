@@ -129,6 +129,52 @@ async def debug_replay_check():
         }
 
 
+@app.get("/debug/replay-drift")
+async def debug_replay_drift(strategy: str = "whale_following", days: int = 1):
+    from app.database import async_session_factory
+    from app.replay.engine import ReplayEngine, ReplayMode
+    from app.services.execution_simulator import ExecutionSimulator
+    from datetime import datetime, timezone, timedelta
+
+    now = datetime.now(timezone.utc)
+    start = now - timedelta(days=days)
+    end = now - timedelta(hours=1)
+
+    async with async_session_factory() as db:
+        engine1 = ReplayEngine(db, ExecutionSimulator())
+        r1 = await engine1.run(strategy, start, end, ReplayMode.SIGNAL_ONLY, signal_interval_seconds=1)
+
+        engine2 = ReplayEngine(db, ExecutionSimulator())
+        r2 = await engine2.run(strategy, start, end, ReplayMode.SIGNAL_ONLY, signal_interval_seconds=1)
+
+    drift_fields = ["strategy_name", "entry_timestamp", "entry_price",
+                    "outcome_5m", "outcome_15m", "outcome_1h", "outcome_4h", "outcome_close",
+                    "pnl_5m", "pnl_15m", "pnl_1h", "pnl_4h", "pnl_close",
+                    "max_favorable_excursion", "max_adverse_excursion",
+                    "execution_slippage", "execution_fill_price"]
+
+    drift = []
+    for i in range(max(len(r1.signals), len(r2.signals))):
+        if i >= len(r1.signals) or i >= len(r2.signals):
+            drift.append({"index": i, "reason": "misaligned_signal_count"})
+            continue
+        for field in drift_fields:
+            v1 = str(getattr(r1.signals[i], field, None))
+            v2 = str(getattr(r2.signals[i], field, None))
+            if v1 != v2:
+                drift.append({"index": i, "field": field, "run1": v1, "run2": v2})
+
+    return {
+        "pass": len(drift) == 0,
+        "signal_count_run1": len(r1.signals),
+        "signal_count_run2": len(r2.signals),
+        "drift_count": len(drift),
+        "events_processed": r1.total_events_processed,
+        "drift_details": drift[:50],
+        "truncated": len(drift) > 50,
+    }
+
+
 @app.get("/debug/backfill-events/{n_markets}/{n_per_market}")
 async def backfill_events(n_markets: int = 3, n_per_market: int = 3):
     from app.database import async_session_factory

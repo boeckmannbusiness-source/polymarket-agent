@@ -18,12 +18,14 @@ class TradeRecord:
 class MarketContext:
     condition_id: str
     market_id: str | None = None
+    outcomes: list[str] | None = None
 
     current_price: float | None = None
     current_mid: float | None = None
     best_bid: float | None = None
     best_ask: float | None = None
     spread: float | None = None
+    outcome_prices: dict[str, float] = field(default_factory=dict)
 
     volume_window_5m: float = 0.0
     volume_window_15m: float = 0.0
@@ -57,6 +59,7 @@ class MarketContext:
 
         self.current_price = price
         self.current_mid = price
+        self.outcome_prices[side] = price
         self.price_history.append((timestamp, price))
         self.volume_history.append((timestamp, size))
 
@@ -150,6 +153,21 @@ class MarketContext:
             return None
         old_price = old_prices[-1][1] if isinstance(old_prices[-1], tuple) else old_prices[-1]
         return (self.current_price - old_price) / old_price
+
+    def get_outcome_price(self, signal_direction: str) -> float | None:
+        """Get the relevant outcome price for a signal direction (BUY_YES/BUY_NO).
+        Maps BUY_YES -> first outcome, BUY_NO -> second outcome."""
+        if not self.outcome_prices:
+            return self.current_price
+        if signal_direction == "BUY_YES":
+            if self.outcomes and len(self.outcomes) > 0:
+                return self.outcome_prices.get(self.outcomes[0])
+            return self.outcome_prices.get("Yes") or self.outcome_prices.get("yes") or self.current_price
+        elif signal_direction == "BUY_NO":
+            if self.outcomes and len(self.outcomes) > 1:
+                return self.outcome_prices.get(self.outcomes[1])
+            return self.outcome_prices.get("No") or self.outcome_prices.get("no") or self.current_price
+        return self.current_price
 
     def get_regime(self) -> str:
         vol = self.get_volatility(3600)
