@@ -130,16 +130,22 @@ async def debug_replay_check():
 
 
 @app.get("/debug/replay-drift")
-async def debug_replay_drift(strategy: str = "whale_following", hours: float = 3):
+async def debug_replay_drift(strategy: str = "whale_following", hours: float = 4):
     from app.database import async_session_factory
     from app.replay.engine import ReplayEngine, ReplayMode
     from app.services.execution_simulator import ExecutionSimulator
     from datetime import datetime, timezone, timedelta
-    import hashlib, json
+    from app.models import MarketEvent
+    from sqlalchemy import select, func
+    import hashlib
 
-    now = datetime.now(timezone.utc)
-    start = now - timedelta(hours=hours)
-    end = now - timedelta(minutes=5)
+    async with async_session_factory() as db:
+        r = await db.execute(select(func.max(MarketEvent.timestamp)))
+        latest_ts = r.scalar()
+        if latest_ts is None:
+            return {"pass": True, "error": "no events in DB"}
+        end = latest_ts - timedelta(minutes=1)
+        start = end - timedelta(hours=hours)
 
     drift_fields = ["strategy_name", "entry_timestamp", "entry_price",
                     "outcome_5m", "outcome_15m", "outcome_1h", "outcome_4h", "outcome_close",
