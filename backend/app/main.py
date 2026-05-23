@@ -130,7 +130,7 @@ async def debug_replay_check():
 
 
 @app.get("/debug/replay-drift")
-async def debug_replay_drift(strategy: str = "whale_following", hours: float = 0.1, max_events: int = 2000):
+async def debug_replay_drift(strategy: str = "whale_following", hours: float = 1, max_events: int = 2000):
     from app.database import async_session_factory
     from app.replay.engine import ReplayEngine, ReplayMode
     from app.services.execution_simulator import ExecutionSimulator
@@ -151,12 +151,16 @@ async def debug_replay_drift(strategy: str = "whale_following", hours: float = 0
             .where(MarketEvent.timestamp.between(start, end))
         )
         total = r.scalar()
-        if total > max_events:
-            return {
-                "error": f"window has {total} events (max {max_events}); use smaller hours value",
-                "total_in_window": total,
-                "suggested_hours": round(0.01 * (max_events / total), 4) if total > 0 else hours,
-            }
+        while total > max_events and hours > 0.001:
+            hours /= 10
+            start = end - timedelta(hours=hours)
+            r = await db.execute(
+                select(func.count()).select_from(MarketEvent)
+                .where(MarketEvent.timestamp.between(start, end))
+            )
+            total = r.scalar()
+    if total > max_events:
+        return {"error": f"could not find window under {max_events} events (min was {total})"}
 
     drift_fields = ["strategy_name", "entry_timestamp", "entry_price",
                     "outcome_5m", "outcome_15m", "outcome_1h", "outcome_4h", "outcome_close",
@@ -175,6 +179,8 @@ async def debug_replay_drift(strategy: str = "whale_following", hours: float = 0
         "hash": h,
         "signal_count": len(result.signals),
         "events_processed": result.total_events_processed,
+        "window_hours": hours,
+        "total_in_window": total,
     }
 
 
