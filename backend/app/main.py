@@ -130,7 +130,7 @@ async def debug_replay_check():
 
 
 @app.get("/debug/replay-drift")
-async def debug_replay_drift(strategy: str = "whale_following", hours: float = 4):
+async def debug_replay_drift(strategy: str = "whale_following", hours: float = 0.25):
     from app.database import async_session_factory
     from app.replay.engine import ReplayEngine, ReplayMode
     from app.services.execution_simulator import ExecutionSimulator
