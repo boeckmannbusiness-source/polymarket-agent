@@ -1,7 +1,7 @@
 import asyncio
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Query
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import settings
@@ -400,6 +400,104 @@ async def debug_redis_stream():
         return {"stream": "market:data", "info": info}
     except Exception as e:
         return {"stream": "market:data", "error": str(e)}
+
+
+@app.post("/debug/backfill-real-trades")
+async def debug_backfill_real_trades(
+    days: int = Query(default=7, ge=1, le=30, description="Days of history to fetch"),
+    limit_per_asset: int = Query(default=500, ge=1, le=1000, description="Max trades per asset"),
+    concurrency: int = Query(default=20, ge=1, le=50, description="Concurrent API calls"),
+):
+    from app.database import async_session_factory
+    from app.models import Market, MarketEvent
+    from sqlalchemy import select, func
+    import httpx
+    import asyncio
+    from datetime import datetime, timezone, timedelta
+
+    async with async_session_factory() as db:
+        result = await db.execute(
+            select(Market).where(Market.clob_token_ids.isnot(None)).where(Market.resolved == False)
+        )
+        markets = list(result.scalars().all())
+
+    cutoff = datetime.now(timezone.utc) - timedelta(days=days)
+    cutoff_ts = int(cutoff.timestamp())
+    created = 0
+    errors = 0
+    skipped = 0
+
+    all_asset_ids = []
+    asset_to_market = {}
+    for m in markets:
+        if not m.clob_token_ids:
+            continue
+        for tid in m.clob_token_ids:
+            all_asset_ids.append(tid)
+            asset_to_market[tid] = m
+
+    sem = asyncio.Semaphore(concurrency)
+
+    async def fetch_trades(asset_id: str):
+        nonlocal created, errors
+        market = asset_to_market[asset_id]
+        async with sem:
+            try:
+                async with httpx.AsyncClient(timeout=15.0) as client:
+                    resp = await client.get(
+                        f"{settings.POLYMARKET_DATA_API_URL}/trades",
+                        params={"asset": asset_id, "limit": limit_per_asset},
+                    )
+                    if resp.status_code != 200:
+                        return
+                    body = resp.json()
+                    raw = body if isinstance(body, list) else body.get("value", [])
+                new_events = []
+                for t in raw:
+                    ts = t.get("timestamp")
+                    if not ts or int(ts) < cutoff_ts:
+                        continue
+                    new_events.append(MarketEvent(
+                        market_id=market.id,
+                        event_type="trade",
+                        event_data={"source": "data_api_backfill", "original": t},
+                        price=float(t["price"]) if t.get("price") else None,
+                        size=float(t["size"]) if t.get("size") else None,
+                        maker_address=t.get("proxyWallet"),
+                        taker_address=None,
+                        outcome=t.get("outcome"),
+                        transaction_hash=t.get("transactionHash"),
+                        timestamp=datetime.fromtimestamp(int(ts), tz=timezone.utc),
+                    ))
+                if new_events:
+                    async with async_session_factory() as db:
+                        for ev in new_events:
+                            exists = await db.execute(
+                                select(func.count()).select_from(MarketEvent)
+                                .where(MarketEvent.market_id == ev.market_id)
+                                .where(MarketEvent.transaction_hash == ev.transaction_hash)
+                            )
+                            if exists.scalar() > 0:
+                                skipped += 1
+                                continue
+                            db.add(ev)
+                            created += 1
+                        await db.commit()
+            except Exception:
+                errors += 1
+
+    batch_size = 50
+    for i in range(0, len(all_asset_ids), batch_size):
+        batch = all_asset_ids[i:i + batch_size]
+        await asyncio.gather(*[fetch_trades(aid) for aid in batch])
+
+    return {
+        "events_created": created,
+        "duplicates_skipped": skipped,
+        "errors": errors,
+        "assets_queried": len(all_asset_ids),
+        "days_history": days,
+    }
 
 
 # Import and include routers
