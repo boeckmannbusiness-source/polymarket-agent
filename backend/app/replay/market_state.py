@@ -107,7 +107,7 @@ class MarketContext:
             while history and history[0][0].timestamp() < age_cutoff:
                 history.pop(0)
 
-        prune(self.price_history, cutoff_5m)
+        prune(self.price_history, cutoff_1h)
 
         i = 0
         while i < len(self.volume_history):
@@ -145,14 +145,18 @@ class MarketContext:
         return variance ** 0.5
 
     def get_momentum(self, window_seconds: int = 3600) -> float | None:
-        if not self.current_price or len(self.price_history) < 2:
+        if not self.current_price or len(self.price_history) < 2 or not self.last_event_timestamp:
             return None
-        cutoff = self.last_event_timestamp.timestamp() - window_seconds if self.last_event_timestamp else 0
-        old_prices = [p for ts, p in self.price_history if ts.timestamp() < cutoff and ts.timestamp() >= cutoff - 60]
-        if not old_prices:
+        cutoff_ts = self.last_event_timestamp.timestamp() - window_seconds
+        best, best_diff = None, float("inf")
+        for ts, p in self.price_history:
+            diff = abs(ts.timestamp() - cutoff_ts)
+            if diff < best_diff:
+                best_diff = diff
+                best = p
+        if best is None:
             return None
-        old_price = old_prices[-1][1] if isinstance(old_prices[-1], tuple) else old_prices[-1]
-        return (self.current_price - old_price) / old_price
+        return (self.current_price - best) / best
 
     def get_outcome_price(self, signal_direction: str) -> float | None:
         """Get the relevant outcome price for a signal direction (BUY_YES/BUY_NO).
