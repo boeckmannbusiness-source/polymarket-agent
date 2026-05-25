@@ -256,26 +256,30 @@ class PolymarketWSIngester(BaseIngester):
             "raw_type": event_type,
         }
 
-    def _normalize_price_event(self, raw: dict) -> dict | None:
-        asset_id = raw.get("asset_id") or raw.get("assetId")
-        if not asset_id:
-            return None
-        condition_id = self._asset_to_condition.get(asset_id)
-        price = None
-        for key in ["price", "marketPrice", "lastPrice", "close"]:
-            val = raw.get(key)
-            if val is not None:
-                price = _safe_float(val)
-                break
-        return {
-            "event_type": "price_change",
-            "market_id": None,
-            "condition_id": condition_id,
-            "conditionId": condition_id,
-            "asset_id": asset_id,
-            "price": price,
-            "timestamp": raw.get("timestamp") or raw.get("t"),
-        }
+    def _normalize_price_events(self, raw: dict) -> list[dict]:
+        condition_id = raw.get("market") or raw.get("condition_id")
+        ts = raw.get("timestamp") or raw.get("t")
+        price_changes = raw.get("price_changes") or raw.get("changes") or []
+        if not isinstance(price_changes, list):
+            return []
+        if not condition_id:
+            return []
+        results = []
+        for pc in price_changes:
+            asset_id = pc.get("asset_id") or pc.get("assetId")
+            if not asset_id:
+                continue
+            results.append({
+                "event_type": "price_change",
+                "market_id": None,
+                "condition_id": condition_id,
+                "conditionId": condition_id,
+                "asset_id": asset_id,
+                "price": _safe_float(pc.get("price")),
+                "timestamp": ts,
+                "raw_type": "price_change",
+            })
+        return results
 
     # ── Store raw events ─────────────────────────────────────
 
@@ -374,9 +378,11 @@ class PolymarketWSIngester(BaseIngester):
                 elif event_type == "price_change":
                     self._parsed_events += 1
                     self._store_raw_event(data, event_type, True, "parsed as price_change")
-                    normalized = self._normalize_price_event(data)
-                    if normalized:
+                    normalized_list = self._normalize_price_events(data)
+                    for normalized in normalized_list:
                         await self._publish_normalized(normalized, "price_change")
+                    if not normalized_list:
+                        self._store_raw_event(data, event_type, False, "price_change_empty_or_bad_structure")
 
                 elif event_type == "book":
                     self._store_raw_event(data, event_type, True, "parsed as orderbook")
