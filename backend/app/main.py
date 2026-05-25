@@ -825,6 +825,33 @@ async def debug_live_trace(event_id: str):
     return trace
 
 
+@app.get("/debug/redis-test")
+async def debug_redis_test():
+    from app.redis import get_redis
+    from datetime import datetime, timezone
+    import uuid, json
+    results = {"steps": {}}
+    try:
+        r = await get_redis()
+        results["steps"]["connected"] = True
+        pong = await r.ping()
+        results["steps"]["ping"] = pong
+        test_id = str(uuid.uuid4())
+        test_data = {"test": True, "id": test_id, "ts": datetime.now(timezone.utc).isoformat()}
+        xid = await r.xadd("test:stream", test_data, maxlen=100)
+        results["steps"]["xadd_success"] = True
+        results["steps"]["xid"] = xid
+        read_back = await r.xrange("test:stream", count=1)
+        results["steps"]["xrange_count"] = len(read_back)
+        await r.delete("test:stream")
+        results["steps"]["cleanup"] = True
+    except Exception as e:
+        results["steps"]["error"] = str(e)
+        import traceback
+        results["steps"]["traceback"] = traceback.format_exc()
+    return results
+
+
 @app.get("/debug/replay-consistency")
 async def debug_replay_consistency(days: float = 1):
     from app.database import async_session_factory

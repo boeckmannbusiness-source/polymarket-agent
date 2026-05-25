@@ -311,8 +311,6 @@ class PolymarketWSIngester(BaseIngester):
             self._store_raw_event(normalized, event_type, False, f"duplicate_hash:{event_hash[:12]}")
             return
 
-        self._normalized_by_type[event_type] = self._normalized_by_type.get(event_type, 0) + 1
-
         trace_id = f"{event_type}_{datetime.now(timezone.utc).timestamp()}"
         normalized["_trace_id"] = trace_id
         normalized["_normalized_at"] = datetime.now(timezone.utc).isoformat()
@@ -320,8 +318,13 @@ class PolymarketWSIngester(BaseIngester):
         if len(self._live_traces) > self._max_live_traces:
             self._prune_stale_traces()
 
-        await EventBus.publish("market:data", event_type, self.name, normalized)
-        self._normalized_events_published += 1
+        try:
+            await EventBus.publish("market:data", event_type, self.name, normalized)
+            self._normalized_events_published += 1
+            self._normalized_by_type[event_type] = self._normalized_by_type.get(event_type, 0) + 1
+        except Exception as e:
+            logger.error("publish_failed", event_type=event_type, error=str(e))
+            self._dropped_by_type[event_type] = self._dropped_by_type.get(event_type, 0) + 1
 
     def _prune_stale_traces(self):
         now = datetime.now(timezone.utc)
