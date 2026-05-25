@@ -825,6 +825,30 @@ async def debug_live_trace(event_id: str):
     return trace
 
 
+@app.post("/debug/redis-flush")
+async def debug_redis_flush():
+    from app.redis import get_redis
+    results = {}
+    try:
+        r = await get_redis()
+        # Delete the market:data stream to free memory
+        await r.delete("market:data")
+        results["deleted_stream"] = "market:data"
+        # Also delete DLQ stream
+        await r.delete("market:data:dlq")
+        results["deleted_dlq"] = "market:data:dlq"
+        # Check memory
+        info = await r.info("memory")
+        results["used_memory_human"] = info.get("used_memory_human", "?")
+        results["maxmemory_human"] = info.get("maxmemory_human", "?")
+        results["status"] = "flushed"
+    except Exception as e:
+        results["error"] = str(e)
+        import traceback
+        results["traceback"] = traceback.format_exc()
+    return results
+
+
 @app.get("/debug/redis-test")
 async def debug_redis_test():
     from app.redis import get_redis
