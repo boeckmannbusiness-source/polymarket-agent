@@ -555,6 +555,354 @@ async def debug_backfill_real_trades(
     }
 
 
+@app.get("/debug/ws-events")
+async def debug_ws_events():
+    if _ws_ingester is None:
+        return {"error": "ws_ingester_not_initialized"}
+    return {
+        "raw_events": _ws_ingester.last_raw_events[-50:],
+        "event_type_counts": _ws_ingester.stats.get("event_type_counts", {}),
+        "total_messages": _ws_ingester.stats.get("messages_received", 0),
+    }
+
+
+@app.get("/debug/event-stats")
+async def debug_event_stats():
+    if _ws_ingester is None:
+        return {"error": "ws_ingester_not_initialized"}
+    ws = _ws_ingester.event_stats
+    bridge = _bridge.stats if _bridge else {}
+    return {
+        "ws_ingester": ws,
+        "event_bridge": {
+            "events_by_type": bridge.get("events_by_type", {}),
+            "persisted_by_type": bridge.get("persisted_by_type", {}),
+            "dropped_by_type": bridge.get("dropped_by_type", {}),
+            "duplicate_events_detected": bridge.get("duplicate_events_detected", 0),
+        },
+        "classification_health": {
+            "unknown_event_types": list(ws.get("unknown_by_type", {}).keys()),
+            "total_unknown": sum(ws.get("unknown_by_type", {}).values()),
+            "total_dropped": ws.get("total_dropped", 0),
+            "validation_failures": ws.get("validation_failures", 0),
+            "duplicates_ingester": ws.get("duplicate_events_detected", 0),
+            "duplicates_bridge": bridge.get("duplicate_events_detected", 0),
+        },
+    }
+
+
+@app.get("/debug/live-pipeline")
+async def debug_live_pipeline():
+    from app.redis import get_redis
+    result = {
+        "ws_ingester": None,
+        "event_bridge": None,
+        "redis_stream": None,
+        "pipeline_flow": {
+            "ws_received": 0,
+            "ws_parsed": 0,
+            "ws_normalized": 0,
+            "bridge_processed": 0,
+            "db_persisted": 0,
+            "end_to_end_health": "unknown",
+            "overall_loss_rate_pct": 0,
+            "loss_by_type": {},
+        },
+    }
+    if _ws_ingester:
+        s = _ws_ingester.stats
+        result["ws_ingester"] = {
+            "connected": s.get("connected"),
+            "messages_received": s.get("messages_received"),
+            "parsed_events": s.get("parsed_events"),
+            "normalized_events_published": s.get("normalized_events_published"),
+            "parse_failures": s.get("parse_failures"),
+            "subscribed_assets": s.get("subscribed_assets"),
+            "last_message_time": s.get("last_message_time"),
+            "reconnect_count": s.get("reconnect_count"),
+            "event_type_counts": s.get("event_type_counts"),
+        }
+        result["pipeline_flow"]["ws_received"] = s.get("messages_received", 0)
+        result["pipeline_flow"]["ws_parsed"] = s.get("parsed_events", 0)
+        result["pipeline_flow"]["ws_normalized"] = s.get("normalized_events_published", 0)
+    if _bridge:
+        b = _bridge.stats
+        result["event_bridge"] = {
+            "events_processed": b.get("events_processed"),
+            "persisted_count": b.get("persisted_count"),
+            "failed_count": b.get("failed_count"),
+            "retry_count": b.get("retry_count"),
+            "dlq_size": b.get("dlq_size"),
+            "events_by_type": b.get("events_by_type"),
+            "persisted_by_type": b.get("persisted_by_type"),
+            "dropped_by_type": b.get("dropped_by_type"),
+            "duplicate_events_detected": b.get("duplicate_events_detected"),
+        }
+        result["pipeline_flow"]["bridge_processed"] = b.get("events_processed", 0)
+        result["pipeline_flow"]["db_persisted"] = b.get("persisted_count", 0)
+        # Per-type loss
+        persisted_by_type = b.get("persisted_by_type", {})
+        events_by_type = b.get("events_by_type", {})
+        loss = {}
+        for etype, total in events_by_type.items():
+            persisted = persisted_by_type.get(etype, 0)
+            loss[etype] = round((1 - persisted / (total or 1)) * 100, 1)
+        result["pipeline_flow"]["loss_by_type"] = loss
+    try:
+        r = await get_redis()
+        info = await r.xinfo_stream("market:data")
+        result["redis_stream"] = {
+            "length": info.get("length", 0),
+            "radix_tree_keys": info.get("radix-tree-keys", 0),
+            "radix_tree_nodes": info.get("radix-tree-nodes", 0),
+            "last_generated_id": info.get("last-generated-id"),
+        }
+    except Exception as e:
+        result["redis_stream"] = {"error": str(e)}
+    ws_rx = result["pipeline_flow"]["ws_received"]
+    ws_parsed = result["pipeline_flow"]["ws_parsed"]
+    bridge_proc = result["pipeline_flow"]["bridge_processed"]
+    persisted = result["pipeline_flow"]["db_persisted"]
+    if ws_rx == 0:
+        result["pipeline_flow"]["end_to_end_health"] = "no_data"
+    elif ws_parsed == 0:
+        result["pipeline_flow"]["end_to_end_health"] = "ingester_unparsed"
+    elif bridge_proc == 0:
+        result["pipeline_flow"]["end_to_end_health"] = "bridge_drop"
+    elif persisted == 0:
+        result["pipeline_flow"]["end_to_end_health"] = "db_write_drop"
+    else:
+        result["pipeline_flow"]["end_to_end_health"] = "healthy"
+    result["pipeline_flow"]["overall_loss_rate_pct"] = (
+        round((1 - persisted / (ws_rx or 1)) * 100, 1)
+    )
+    return result
+
+
+@app.get("/debug/live-trace/{event_id}")
+async def debug_live_trace(event_id: str):
+    from app.database import async_session_factory
+    from sqlalchemy import select
+    from app.models import MarketEvent, Market
+    from app.models import Signal, Trade
+    from datetime import timedelta
+
+    def _sf(v):
+        if v is None: return None
+        try: return float(v)
+        except (ValueError, TypeError): return None
+
+    if _ws_ingester is None or _bridge is None:
+        return {"error": "ingester or bridge not initialized"}
+
+    trace = {
+        "trace_id": event_id,
+        "ws_raw": None,
+        "normalized_event": None,
+        "validation": {"valid": None, "reason": None},
+        "duplicate_check": {"is_duplicate": None},
+        "redis_stream": None,
+        "bridge_consumed": None,
+        "bridge_dlq": False,
+        "db_persisted": None,
+        "strategy_signals": [],
+        "execution": [],
+    }
+
+    ws_traces = _ws_ingester.live_traces
+    normalized = ws_traces.get(event_id)
+    if not normalized:
+        return {"error": f"event_id '{event_id}' not found in live traces", "trace": trace}
+
+    # 1. WS raw (if stored in _last_raw_events)
+    for raw in _ws_ingester.last_raw_events:
+        if raw.get("received_at", "").startswith(normalized.get("_normalized_at", "")[:19]):
+            trace["ws_raw"] = raw
+            break
+
+    # 2. Normalized event
+    trace["normalized_event"] = normalized
+
+    # 3. Schema validation check
+    from app.ingesters.polymarket_ws import PolymarketWSIngester
+    valid, reason = PolymarketWSIngester._validate_normalized(normalized)
+    trace["validation"] = {"valid": valid, "reason": reason}
+
+    # 4. Duplicate check
+    event_hash = PolymarketWSIngester._compute_event_hash(normalized)
+    trace["duplicate_check"] = {"hash": event_hash[:16]}
+
+    # 5. Redis stream (check if event made it to stream)
+    try:
+        from app.redis import get_redis
+        r = await get_redis()
+        info = await r.xinfo_stream("market:data")
+        trace["redis_stream"] = {
+            "length": info.get("length", 0),
+        }
+        # Check pending for this consumer group
+        pending = await r.xpending("market:data", "persistence_bridge")
+        trace["bridge_consumed"] = {
+            "pending_count": pending.get("pending", 0) if pending else 0,
+        }
+    except Exception as e:
+        trace["redis_stream"] = {"error": str(e)}
+
+    # 6. DB persistence
+    condition_id = normalized.get("condition_id") or normalized.get("conditionId")
+    price = normalized.get("price")
+    timestamp = normalized.get("timestamp")
+    if condition_id:
+        async with async_session_factory() as db:
+            m = await db.execute(
+                select(Market).where(Market.condition_id == condition_id)
+            )
+            m = m.scalar_one_or_none()
+            if m:
+                events = await db.execute(
+                    select(MarketEvent)
+                    .where(MarketEvent.market_id == m.id)
+                    .where(MarketEvent.price == (_sf(price) if price else None))
+                    .order_by(MarketEvent.timestamp.desc())
+                    .limit(5)
+                )
+                trace["db_persisted"] = [
+                    {
+                        "id": e.id,
+                        "event_type": e.event_type,
+                        "price": float(e.price) if e.price else None,
+                        "size": float(e.size) if e.size else None,
+                        "timestamp": e.timestamp.isoformat() if e.timestamp else None,
+                    }
+                    for e in events.scalars().all()
+                ]
+                # 7. Strategy signals from this market
+                if trace["db_persisted"]:
+                    latest_ts = trace["db_persisted"][0].get("timestamp")
+                    if latest_ts:
+                        cutoff = datetime.fromisoformat(latest_ts.replace("Z", "+00:00")) - timedelta(seconds=5)
+                        signals = await db.execute(
+                            select(Signal)
+                            .where(Signal.market_id == m.id)
+                            .where(Signal.created_at >= cutoff)
+                            .order_by(Signal.created_at.desc())
+                            .limit(5)
+                        )
+                        trace["strategy_signals"] = [
+                            {
+                                "id": s.id,
+                                "strategy": s.strategy_name,
+                                "signal": s.signal,
+                                "confidence": float(s.confidence) if s.confidence else None,
+                                "price": float(s.entry_price) if s.entry_price else None,
+                                "created_at": s.created_at.isoformat() if s.created_at else None,
+                            }
+                            for s in signals.scalars().all()
+                        ]
+                        # 8. Paper trades from signals
+                        if trace["strategy_signals"]:
+                            signal_ids = [s["id"] for s in trace["strategy_signals"]]
+                            trades = await db.execute(
+                                select(Trade)
+                                .where(Trade.signal_id.in_(signal_ids))
+                                .limit(5)
+                            )
+                            trace["execution"] = [
+                                {
+                                    "id": t.id,
+                                    "side": t.side,
+                                    "outcome": t.outcome,
+                                    "size": float(t.size) if t.size else None,
+                                    "price": float(t.entry_price) if t.entry_price else None,
+                                    "status": t.status,
+                                    "created_at": t.created_at.isoformat() if t.created_at else None,
+                                }
+                                for t in trades.scalars().all()
+                            ]
+
+    trace["bridge_dlq_size"] = _bridge.stats.get("dlq_size", 0)
+
+    return trace
+
+
+@app.get("/debug/replay-consistency")
+async def debug_replay_consistency(days: float = 1):
+    from app.database import async_session_factory
+    from app.replay.engine import ReplayEngine, ReplayMode
+    from app.services.execution_simulator import ExecutionSimulator
+    from app.models import Signal
+    from sqlalchemy import select, func
+    from datetime import datetime, timezone, timedelta
+    import hashlib
+
+    now = datetime.now(timezone.utc)
+    start = now - timedelta(days=days)
+
+    async with async_session_factory() as db:
+        # Live signals from DB
+        live_result = await db.execute(
+            select(Signal)
+            .where(Signal.generated_at.between(start, now))
+            .order_by(Signal.generated_at.asc())
+        )
+        live_signals = list(live_result.scalars().all())
+
+        # Replay signals from same window
+        engine = ReplayEngine(db, ExecutionSimulator())
+        replay_result = await engine.run(
+            strategy_name=None,
+            start_time=start,
+            end_time=now,
+            mode=ReplayMode.SIGNAL_ONLY,
+            signal_interval_seconds=60,
+        )
+
+    replay_signals = replay_result.signals
+
+    # Aggregate comparison: count by strategy
+    live_by_strategy: dict[str, int] = {}
+    for s in live_signals:
+        key = f"{s.signal_type}:{s.direction}"
+        live_by_strategy[key] = live_by_strategy.get(key, 0) + 1
+
+    replay_by_strategy: dict[str, int] = {}
+    for s in replay_signals:
+        key = f"{s.signal.signal}:{s.strategy_name}"
+        replay_by_strategy[key] = replay_by_strategy.get(key, 0) + 1
+
+    # Determinism check: replay twice and compare hashes
+    async with async_session_factory() as db:
+        engine2 = ReplayEngine(db, ExecutionSimulator())
+        replay2 = await engine2.run(
+            strategy_name=None,
+            start_time=start,
+            end_time=now,
+            mode=ReplayMode.SIGNAL_ONLY,
+            signal_interval_seconds=60,
+        )
+
+    rows1 = [f"{s.signal.signal}|{s.entry_price}|{s.entry_timestamp}" for s in replay_signals]
+    rows2 = [f"{s.signal.signal}|{s.entry_price}|{s.entry_timestamp}" for s in replay2.signals]
+    hash1 = hashlib.sha256("|".join(rows1).encode()).hexdigest()
+    hash2 = hashlib.sha256("|".join(rows2).encode()).hexdigest()
+    deterministic = hash1 == hash2
+
+    return {
+        "window_hours": days * 24,
+        "window_events": replay_result.total_events_processed,
+        "live_signals_count": len(live_signals),
+        "live_by_strategy": live_by_strategy,
+        "replay_signals_count": len(replay_signals),
+        "replay_by_strategy": replay_by_strategy,
+        "replay_deterministic": deterministic,
+        "replay_drift_hash": hash1,
+        "consistency_note": (
+            "replay and live signal counts compared by strategy-type distribution. "
+            "exact 1:1 matching requires shared trace_ids between WS and signals."
+        ),
+    }
+
+
 # Import and include routers
 from app.api.router import router as api_router
 app.include_router(api_router, prefix="/api/v1")
