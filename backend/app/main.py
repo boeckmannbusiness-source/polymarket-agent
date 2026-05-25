@@ -917,74 +917,68 @@ async def debug_replay_consistency(days: float = 1, strategy: str = "whale_follo
     from app.models import Signal
     from sqlalchemy import select, func
     from datetime import datetime, timezone, timedelta
-    import hashlib
+    import hashlib, traceback
 
-    now = datetime.now(timezone.utc)
-    start = now - timedelta(days=days)
+    try:
+        now = datetime.now(timezone.utc)
+        start = now - timedelta(days=days)
 
-    async with async_session_factory() as db:
-        # Live signals from DB
-        live_result = await db.execute(
-            select(Signal)
-            .where(Signal.generated_at.between(start, now))
-            .order_by(Signal.generated_at.asc())
-        )
-        live_signals = list(live_result.scalars().all())
+        async with async_session_factory() as db:
+            live_result = await db.execute(
+                select(Signal)
+                .where(Signal.generated_at.between(start, now))
+                .order_by(Signal.generated_at.asc())
+            )
+            live_signals = list(live_result.scalars().all())
 
-        # Replay signals from same window
-        engine = ReplayEngine(db, ExecutionSimulator())
-        replay_result = await engine.run(
-            strategy_name=strategy,
-            start_time=start,
-            end_time=now,
-            mode=ReplayMode.SIGNAL_ONLY,
-            signal_interval_seconds=60,
-        )
+            engine = ReplayEngine(db, ExecutionSimulator())
+            replay_result = await engine.run(
+                strategy_name=strategy,
+                start_time=start,
+                end_time=now,
+                mode=ReplayMode.SIGNAL_ONLY,
+                signal_interval_seconds=60,
+            )
 
-    replay_signals = replay_result.signals
+        replay_signals = replay_result.signals
 
-    # Aggregate comparison: count by strategy
-    live_by_strategy: dict[str, int] = {}
-    for s in live_signals:
-        key = f"{s.signal_type}:{s.direction}"
-        live_by_strategy[key] = live_by_strategy.get(key, 0) + 1
+        live_by_strategy: dict[str, int] = {}
+        for s in live_signals:
+            key = f"{s.signal_type}:{s.direction}"
+            live_by_strategy[key] = live_by_strategy.get(key, 0) + 1
 
-    replay_by_strategy: dict[str, int] = {}
-    for s in replay_signals:
-        key = f"{s.signal.signal}:{s.strategy_name}"
-        replay_by_strategy[key] = replay_by_strategy.get(key, 0) + 1
+        replay_by_strategy: dict[str, int] = {}
+        for s in replay_signals:
+            key = f"{s.signal.signal}:{s.strategy_name}"
+            replay_by_strategy[key] = replay_by_strategy.get(key, 0) + 1
 
-    # Determinism check: replay twice and compare hashes
-    async with async_session_factory() as db:
-        engine2 = ReplayEngine(db, ExecutionSimulator())
-        replay2 = await engine2.run(
-            strategy_name=strategy,
-            start_time=start,
-            end_time=now,
-            mode=ReplayMode.SIGNAL_ONLY,
-            signal_interval_seconds=60,
-        )
+        async with async_session_factory() as db:
+            engine2 = ReplayEngine(db, ExecutionSimulator())
+            replay2 = await engine2.run(
+                strategy_name=strategy,
+                start_time=start,
+                end_time=now,
+                mode=ReplayMode.SIGNAL_ONLY,
+                signal_interval_seconds=60,
+            )
 
-    rows1 = [f"{s.signal.signal}|{s.entry_price}|{s.entry_timestamp}" for s in replay_signals]
-    rows2 = [f"{s.signal.signal}|{s.entry_price}|{s.entry_timestamp}" for s in replay2.signals]
-    hash1 = hashlib.sha256("|".join(rows1).encode()).hexdigest()
-    hash2 = hashlib.sha256("|".join(rows2).encode()).hexdigest()
-    deterministic = hash1 == hash2
+        rows1 = [f"{s.signal.signal}|{s.entry_price}|{s.entry_timestamp}" for s in replay_signals]
+        rows2 = [f"{s.signal.signal}|{s.entry_price}|{s.entry_timestamp}" for s in replay2.signals]
+        hash1 = hashlib.sha256("|".join(rows1).encode()).hexdigest()
+        hash2 = hashlib.sha256("|".join(rows2).encode()).hexdigest()
 
-    return {
-        "window_hours": days * 24,
-        "window_events": replay_result.total_events_processed,
-        "live_signals_count": len(live_signals),
-        "live_by_strategy": live_by_strategy,
-        "replay_signals_count": len(replay_signals),
-        "replay_by_strategy": replay_by_strategy,
-        "replay_deterministic": deterministic,
-        "replay_drift_hash": hash1,
-        "consistency_note": (
-            "replay and live signal counts compared by strategy-type distribution. "
-            "exact 1:1 matching requires shared trace_ids between WS and signals."
-        ),
-    }
+        return {
+            "window_hours": days * 24,
+            "window_events": replay_result.total_events_processed,
+            "live_signals_count": len(live_signals),
+            "live_by_strategy": live_by_strategy,
+            "replay_signals_count": len(replay_signals),
+            "replay_by_strategy": replay_by_strategy,
+            "replay_deterministic": hash1 == hash2,
+            "replay_drift_hash": hash1,
+        }
+    except Exception as e:
+        return {"error": str(e), "traceback": traceback.format_exc()}
 
 
 # Import and include routers
