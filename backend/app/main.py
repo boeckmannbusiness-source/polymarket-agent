@@ -910,7 +910,7 @@ async def debug_redis_test():
 
 
 @app.get("/debug/replay-consistency")
-async def debug_replay_consistency(days: float = 1):
+async def debug_replay_consistency(days: float = 1, strategy: str = "whale_following"):
     from app.database import async_session_factory
     from app.replay.engine import ReplayEngine, ReplayMode
     from app.services.execution_simulator import ExecutionSimulator
@@ -934,7 +934,7 @@ async def debug_replay_consistency(days: float = 1):
         # Replay signals from same window
         engine = ReplayEngine(db, ExecutionSimulator())
         replay_result = await engine.run(
-            strategy_name=None,
+            strategy_name=strategy,
             start_time=start,
             end_time=now,
             mode=ReplayMode.SIGNAL_ONLY,
@@ -958,7 +958,7 @@ async def debug_replay_consistency(days: float = 1):
     async with async_session_factory() as db:
         engine2 = ReplayEngine(db, ExecutionSimulator())
         replay2 = await engine2.run(
-            strategy_name=None,
+            strategy_name=strategy,
             start_time=start,
             end_time=now,
             mode=ReplayMode.SIGNAL_ONLY,
