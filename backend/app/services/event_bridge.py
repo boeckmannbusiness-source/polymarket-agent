@@ -76,7 +76,12 @@ class EventPersistenceBridge:
             except asyncio.CancelledError:
                 break
             except Exception as e:
-                logger.error("persist_market_events_error", error=str(e))
+                err_str = str(e)
+                if "NOGROUP" in err_str or "no such consumer group" in err_str.lower():
+                    logger.warning("consumer_group_missing_recreating")
+                    r = await EventBus.subscribe_to_stream("market:data", "persistence_bridge", "writer_1")
+                else:
+                    logger.error("persist_market_events_error", error=err_str)
                 await asyncio.sleep(1)
 
     # ── Retry + persist ──────────────────────────────────────

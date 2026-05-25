@@ -825,6 +825,25 @@ async def debug_live_trace(event_id: str):
     return trace
 
 
+@app.post("/debug/force-consume")
+async def debug_force_consume(count: int = 200):
+    if _bridge is None:
+        return {"error": "bridge not initialized"}
+    result = await _bridge.consume_pending(count=count)
+    return result
+
+
+@app.post("/debug/restart-bridge")
+async def debug_restart_bridge():
+    global _bridge
+    if _bridge is None:
+        return {"error": "bridge not initialized"}
+    await _bridge.stop()
+    _bridge = EventPersistenceBridge()
+    await _bridge.start()
+    return {"status": "bridge_restarted"}
+
+
 @app.post("/debug/redis-flush")
 async def debug_redis_flush():
     from app.redis import get_redis
