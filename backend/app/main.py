@@ -837,13 +837,27 @@ async def debug_redis_test():
         pong = await r.ping()
         results["steps"]["ping"] = pong
         test_id = str(uuid.uuid4())
-        test_data = {"test": True, "id": test_id, "ts": datetime.now(timezone.utc).isoformat()}
+        test_data = {"test": "true", "id": test_id, "ts": datetime.now(timezone.utc).isoformat()}
         xid = await r.xadd("test:stream", test_data, maxlen=100)
         results["steps"]["xadd_success"] = True
         results["steps"]["xid"] = xid
         read_back = await r.xrange("test:stream", count=1)
         results["steps"]["xrange_count"] = len(read_back)
         await r.delete("test:stream")
+
+        # Test EventBus.publish with a normalized-like payload
+        from app.core.events import EventBus
+        test_normalized = {
+            "event_type": "price_change",
+            "condition_id": "0x0000000000000000000000000000000000000000000000000000000000000001",
+            "asset_id": "12345",
+            "price": 0.75,
+            "timestamp": "1779724497505",
+        }
+        await EventBus.publish("market:data", "price_change", "redis_test", test_normalized)
+        results["steps"]["eventbus_publish"] = True
+        info2 = await r.xinfo_stream("market:data")
+        results["steps"]["stream_length_after"] = info2.get("length", 0)
         results["steps"]["cleanup"] = True
     except Exception as e:
         results["steps"]["error"] = str(e)
