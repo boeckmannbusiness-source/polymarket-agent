@@ -39,6 +39,10 @@ class WhaleAgent(BaseAgent):
                                     tx_hash=data.get("transaction_hash"),
                                 )
 
+                                scores = await service.get_wallet_scores(wallet, score_type="overall")
+                                wallet_score = scores[0].score if scores else None
+                                wallet_win_rate = float(wallet_obj.win_rate) if wallet_obj.win_rate else None
+
                                 await EventBus.publish(
                                     "wallet:trade",
                                     "wallet.trade.detected",
@@ -46,8 +50,14 @@ class WhaleAgent(BaseAgent):
                                     {
                                         "wallet": wallet,
                                         "trade_id": trade.id,
-                                        "size": float(data.get("value", 0) or 0),
+                                        "size": float(data.get("value", data.get("size", 0)) or 0),
                                         "event_type": event_type,
+                                        "side": data.get("side", "buy"),
+                                        "price": float(data.get("price", 0) or 0),
+                                        "condition_id": data.get("condition_id", ""),
+                                        "outcome": data.get("outcome"),
+                                        "wallet_score": wallet_score,
+                                        "wallet_win_rate": wallet_win_rate,
                                     },
                                 )
 

@@ -5,6 +5,7 @@ from app.core.events import EventBus
 from app.core.logging import logger
 from app.database import async_session_factory
 from app.llm import get_llm_provider
+from app.services.market_enrichment_service import MarketEnrichmentService
 from app.services.signal_service import SignalService
 from app.services.strategy_service import StrategyService
 from app.strategies import get_strategy, get_strategy_names
@@ -28,9 +29,14 @@ class SignalAgent(BaseAgent):
                 messages = await EventBus.read_stream(r, "wallet:trade", "signal_agent", "signal_1", block=10000)
 
                 for msg in messages:
-                    data = msg.get("data", {})
+                    data = dict(msg.get("data", {}))
 
                     async with async_session_factory() as db:
+                        enrichment = await MarketEnrichmentService(db).enrich(
+                            data.get("condition_id") or data.get("market_condition_id")
+                        )
+                        data.update(enrichment)
+
                         strategy_service = StrategyService(db)
                         signal_service = SignalService(db)
 
