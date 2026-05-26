@@ -99,6 +99,26 @@ async def system_status():
     }
 
 
+@app.get("/debug/memory")
+async def debug_memory():
+    import os, gc
+    gc.collect()
+    info = {"gc_objects": len(gc.get_objects())}
+    try:
+        with open("/proc/self/status") as f:
+            for line in f:
+                if line.startswith("VmRSS:"):
+                    info["rss_kb"] = int(line.split()[1])
+                elif line.startswith("VmSize:"):
+                    info["vm_size_kb"] = int(line.split()[1])
+                elif line.startswith("VmPeak:"):
+                    info["vm_peak_kb"] = int(line.split()[1])
+    except FileNotFoundError:
+        pass
+    info["rss_mb"] = round(info.get("rss_kb", 0) / 1024, 1)
+    return info
+
+
 @app.get("/debug/replay-check")
 async def debug_replay_check():
     from app.database import async_session_factory

@@ -1,0 +1,16 @@
+.git/
+.gitignore
+.env
+.env.example
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+node_modules/
+frontend/
+grafana/
+README.md
+.dockerignore
+fly.toml
+render.yaml
+Makefile

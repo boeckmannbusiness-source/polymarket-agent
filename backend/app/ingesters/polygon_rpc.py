@@ -1,9 +1,6 @@
 import asyncio
 from typing import Any
 
-from web3 import Web3
-from web3.types import LogReceipt
-
 from app.config import settings
 from app.core.logging import logger
 from app.ingesters.base import BaseIngester
@@ -14,6 +11,8 @@ class PolygonRPCListener(BaseIngester):
     name = "polygon_rpc"
 
     def __init__(self, poll_interval: int = 15):
+        from web3 import Web3
+
         super().__init__()
         self.poll_interval = poll_interval
         self.w3 = Web3(Web3.HTTPProvider(settings.POLYGON_RPC_URL))

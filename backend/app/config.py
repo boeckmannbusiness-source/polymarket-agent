@@ -63,12 +63,13 @@ class Settings(BaseSettings):
 
     # Database
     DATABASE_URL: str = "postgresql+asyncpg://user:password@host:5432/polymarket"
-    DATABASE_POOL_SIZE: int = 20
-    DATABASE_MAX_OVERFLOW: int = 10
+    DATABASE_POOL_SIZE: int = 2
+    DATABASE_MAX_OVERFLOW: int = 1
 
     # Redis
     REDIS_URL: str = "redis://user:password@host:6379/0"
-    REDIS_MAX_CONNECTIONS: int = 50
+    REDIS_MAX_CONNECTIONS: int = 10
+    REDIS_STREAM_MAXLEN: int = 1000
 
     # Telegram
     TELEGRAM_BOT_TOKEN: str = ""
@@ -88,7 +89,7 @@ class Settings(BaseSettings):
     TAKE_PROFIT_PERCENT: float = 50.0
 
     # Monitoring
-    LOG_LEVEL: str = "INFO"
+    LOG_LEVEL: str = "WARNING"
     LOG_FORMAT: Literal["json", "text"] = "json"
     METRICS_ENABLED: bool = True
     HEARTBEAT_INTERVAL_SECONDS: int = 30

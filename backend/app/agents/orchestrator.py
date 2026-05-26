@@ -1,26 +1,31 @@
 import asyncio
 
 from app.agents.base import BaseAgent
-from app.agents.research_agent import ResearchAgent
-from app.agents.whale_agent import WhaleAgent
-from app.agents.signal_agent import SignalAgent
-from app.agents.risk_agent import RiskAgent
-from app.agents.execution_agent import ExecutionAgent
-from app.agents.monitoring_agent import MonitoringAgent
+from app.config import settings
 from app.core.logging import logger
 from app.core.events import EventBus
 
 
 class Orchestrator:
     def __init__(self):
+        from app.agents.whale_agent import WhaleAgent
+        from app.agents.signal_agent import SignalAgent
+        from app.agents.risk_agent import RiskAgent
+        from app.agents.execution_agent import ExecutionAgent
+
         self.agents: dict[str, BaseAgent] = {
-            "research": ResearchAgent(),
             "whale": WhaleAgent(),
             "signal": SignalAgent(),
             "risk": RiskAgent(),
             "execution": ExecutionAgent(),
-            "monitoring": MonitoringAgent(),
         }
+
+        # Heavy agents skipped on low-memory production tiers
+        if settings.APP_ENV != "production":
+            from app.agents.research_agent import ResearchAgent
+            from app.agents.monitoring_agent import MonitoringAgent
+            self.agents["research"] = ResearchAgent()
+            self.agents["monitoring"] = MonitoringAgent()
 
     async def start_all(self):
         logger.info("orchestrator_starting", agent_count=len(self.agents))

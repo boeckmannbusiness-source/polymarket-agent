@@ -1,0 +1,54 @@
+app = "polymarket-agent"
+primary_region = "fra"
+
+[build]
+  dockerfile = "backend/Dockerfile"
+
+[http_service]
+  internal_port = 8080
+  force_https = true
+  auto_stop_machines = false
+  auto_start_machines = true
+  min_machines_running = 1
+  processes = ["app"]
+
+[[services]]
+  protocol = "tcp"
+  internal_port = 8080
+  processes = ["app"]
+
+  [services.concurrency]
+    type = "connections"
+    hard_limit = 50
+    soft_limit = 25
+
+  [[services.ports]]
+    port = 80
+    handlers = ["http"]
+    force_https = true
+
+  [[services.ports]]
+    port = 443
+    handlers = ["tls", "http"]
+
+  [[services.http_checks]]
+    interval = "30s"
+    timeout = "10s"
+    path = "/health"
+    method = "GET"
+
+[env]
+  APP_ENV = "production"
+  APP_DEBUG = "false"
+  APP_PORT = "8080"
+  TRADING_MODE = "paper"
+  CORS_ORIGINS = "https://polymarket-agent-tau.vercel.app"
+  LLM_DEFAULT_PROVIDER = "fallback"
+  METRICS_ENABLED = "false"
+  DATABASE_POOL_SIZE = "2"
+  DATABASE_MAX_OVERFLOW = "1"
+  REDIS_MAX_CONNECTIONS = "10"
+
+[mounts]
+  source = "data"
+  destination = "/data"
