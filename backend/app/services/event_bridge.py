@@ -65,7 +65,7 @@ class EventPersistenceBridge:
         r = await EventBus.subscribe_to_stream("market:data", "persistence_bridge", "writer_1")
         while self.running:
             try:
-                messages = await EventBus.read_stream(r, "market:data", "persistence_bridge", "writer_1", count=100, block=5000)
+                messages = await EventBus.read_stream(r, "market:data", "persistence_bridge", "writer_1", count=500, block=5000)
                 for msg in messages:
                     event_type = msg.get("event_type", "unknown")
                     self._events_by_type[event_type] = self._events_by_type.get(event_type, 0) + 1

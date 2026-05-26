@@ -3,6 +3,7 @@ import uuid
 from datetime import datetime, timezone
 from typing import Any
 
+from app.config import settings
 from app.redis import get_redis
 
 
@@ -45,7 +46,7 @@ class EventBus:
         if stream_or_channel in EventBus.PUBSUB_CHANNELS:
             await r.publish(stream_or_channel, json.dumps(event))
         else:
-            await r.xadd(stream_or_channel, event, maxlen=10000)
+            await r.xadd(stream_or_channel, event, maxlen=settings.REDIS_STREAM_MAXLEN)
 
     @staticmethod
     async def subscribe_to_stream(stream: str, group: str, consumer: str):

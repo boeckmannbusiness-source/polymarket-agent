@@ -53,6 +53,9 @@ async def lifespan(app: FastAPI):
     bg_tasks.append(asyncio.create_task(_periodic_db_cleanup(), name="db_cleanup"))
     logger.info("db_cleanup_started")
 
+    bg_tasks.append(asyncio.create_task(_periodic_redis_cleanup(), name="redis_cleanup"))
+    logger.info("redis_cleanup_started")
+
     yield
 
     logger.info("shutting_down")
@@ -89,6 +92,29 @@ async def _periodic_db_cleanup():
             break
         except Exception as e:
             logger.warning("db_cleanup_error", error=str(e))
+
+
+async def _periodic_redis_cleanup():
+    from app.redis import get_redis
+    import asyncio
+
+    await asyncio.sleep(30)
+    while True:
+        try:
+            await asyncio.sleep(600)
+            r = await get_redis()
+            # Trim main stream to REDIS_STREAM_MAXLEN
+            await r.xtrim("market:data", maxlen=settings.REDIS_STREAM_MAXLEN)
+            # Clean up DLQ
+            await r.xtrim("market:data:dlq", maxlen=500)
+            # Clean up any stale streams older than 1h
+            cutoff = int(asyncio.get_event_loop().time()) - 3600
+            for stream in await r.keys("test:*"):
+                await r.delete(stream)
+        except asyncio.CancelledError:
+            break
+        except Exception as e:
+            logger.warning("redis_cleanup_error", error=str(e))
 
 
 app = FastAPI(
@@ -953,6 +979,29 @@ async def debug_redis_test():
         results["steps"]["error"] = str(e)
         import traceback
         results["steps"]["traceback"] = traceback.format_exc()
+    return results
+
+
+@app.post("/debug/redis-cleanup")
+async def debug_redis_cleanup(maxlen: int = 1000):
+    from app.redis import get_redis
+    results = {}
+    try:
+        r = await get_redis()
+        before = await r.xlen("market:data")
+        trimmed = await r.xtrim("market:data", maxlen=maxlen)
+        results["stream_before"] = before
+        results["stream_trimmed"] = trimmed
+        dlq_before = await r.xlen("market:data:dlq")
+        dlq_trimmed = await r.xtrim("market:data:dlq", maxlen=500)
+        results["dlq_before"] = dlq_before
+        results["dlq_trimmed"] = dlq_trimmed
+        info = await r.info("memory")
+        results["used_memory_human"] = info.get("used_memory_human", "?")
+        results["maxmemory_human"] = info.get("maxmemory_human", "?")
+        results["status"] = "cleaned"
+    except Exception as e:
+        results["error"] = str(e)
     return results
 
 
