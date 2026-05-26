@@ -1,4 +1,4 @@
-app = "polymarket-agent"
+app = "polymarket-agent-9ygsug"
 primary_region = "fra"
 
 [build]
