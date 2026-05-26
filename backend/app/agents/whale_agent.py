@@ -24,7 +24,7 @@ class WhaleAgent(BaseAgent):
                     event_type = msg.get("event_type", "")
 
                     if event_type in ("onchain_trade", "trade"):
-                        wallet = data.get("from") or data.get("maker_address")
+                        wallet = data.get("from") or data.get("maker_address") or data.get("wallet")
                         if wallet:
                             async with async_session_factory() as db:
                                 service = WhaleService(db)
