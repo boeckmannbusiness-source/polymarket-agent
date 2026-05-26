@@ -50,6 +50,9 @@ async def lifespan(app: FastAPI):
     bg_tasks.append(asyncio.create_task(orchestrator.start_all(), name="orchestrator"))
     logger.info("orchestrator_started")
 
+    bg_tasks.append(asyncio.create_task(_periodic_db_cleanup(), name="db_cleanup"))
+    logger.info("db_cleanup_started")
+
     yield
 
     logger.info("shutting_down")
@@ -62,6 +65,30 @@ async def lifespan(app: FastAPI):
     await asyncio.gather(*bg_tasks, return_exceptions=True)
     await close_redis()
     logger.info("shutdown_complete")
+
+
+async def _periodic_db_cleanup():
+    from app.database import async_session_factory
+    from sqlalchemy import text
+    from datetime import datetime, timezone, timedelta
+    import asyncio
+
+    while True:
+        try:
+            await asyncio.sleep(3600)
+            cutoff = datetime.now(timezone.utc) - timedelta(hours=6)
+            async with async_session_factory() as db:
+                result = await db.execute(
+                    text("DELETE FROM market_events WHERE timestamp < :cutoff"),
+                    {"cutoff": cutoff},
+                )
+                await db.commit()
+                if result.rowcount:
+                    logger.info("db_cleanup_deleted", rows=result.rowcount)
+        except asyncio.CancelledError:
+            break
+        except Exception as e:
+            logger.warning("db_cleanup_error", error=str(e))
 
 
 app = FastAPI(
