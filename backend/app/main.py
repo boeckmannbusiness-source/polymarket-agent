@@ -1001,6 +1001,41 @@ async def debug_replay_consistency(days: float = 1, strategy: str = "whale_follo
         return {"error": str(e), "traceback": traceback.format_exc()}
 
 
+@app.post("/debug/cleanup-db")
+async def debug_cleanup_db(keep_hours: float = 24, truncate_markets: bool = False):
+    from app.database import async_session_factory
+    from app.models import MarketEvent, Market, Signal, Trade, Position, Wallet, WalletTrade
+    from sqlalchemy import text
+    from datetime import datetime, timezone, timedelta
+
+    cutoff = datetime.now(timezone.utc) - timedelta(hours=keep_hours)
+    results = {}
+    async with async_session_factory() as db:
+        try:
+            result = await db.execute(
+                text("DELETE FROM market_events WHERE timestamp < :cutoff"),
+                {"cutoff": cutoff},
+            )
+            await db.commit()
+            results["market_events_deleted"] = result.rowcount
+        except Exception as e:
+            await db.rollback()
+            return {"error": str(e)}
+
+        if truncate_markets:
+            try:
+                result = await db.execute(text("DELETE FROM markets WHERE resolved = TRUE"))
+                await db.commit()
+                results["resolved_markets_deleted"] = result.rowcount
+            except Exception as e:
+                await db.rollback()
+                return {"error": str(e)}
+
+    results["status"] = "cleanup_complete"
+    results["note"] = "Space may take a few minutes to reflect in Neon dashboard"
+    return results
+
+
 # Import and include routers
 from app.api.router import router as api_router
 app.include_router(api_router, prefix="/api/v1")
