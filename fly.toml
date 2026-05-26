@@ -2,6 +2,7 @@ app = "polymarket-agent"
 primary_region = "fra"
 
 [build]
+  dockerfile = "backend/Dockerfile"
 
 [http_service]
   internal_port = 8080
