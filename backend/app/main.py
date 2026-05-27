@@ -1130,6 +1130,42 @@ async def debug_snapshot_all():
     }
 
 
+@app.get("/debug/snapshot-test")
+async def debug_snapshot_test(condition_id: str = ""):
+    import time, traceback
+    from app.database import async_session_factory
+    from sqlalchemy import select
+    from app.models import Market
+
+    if not condition_id:
+        return {"error": "provide condition_id query param"}
+
+    async with async_session_factory() as db:
+        m = await db.execute(select(Market).where(Market.condition_id == condition_id))
+        market = m.scalar_one_or_none()
+        if not market:
+            return {"error": f"market not found for {condition_id}"}
+
+        from app.services.market_snapshot_service import MarketStateSnapshotService
+        service = MarketStateSnapshotService(db)
+        try:
+            start = time.monotonic()
+            snap = await service.snapshot_market(condition_id)
+            elapsed = time.monotonic() - start
+            return {
+                "snapshot_created": snap is not None,
+                "snapshot_id": str(snap.id) if snap else None,
+                "market_id": str(market.id),
+                "market_condition_id": market.condition_id[:20],
+                "elapsed_seconds": round(elapsed, 3),
+            }
+        except Exception as e:
+            return {
+                "error": str(e),
+                "traceback": traceback.format_exc(),
+            }
+
+
 # Import and include routers
 from app.api.router import router as api_router
 app.include_router(api_router, prefix="/api/v1")
