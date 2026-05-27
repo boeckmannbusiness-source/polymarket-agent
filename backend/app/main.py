@@ -1112,6 +1112,24 @@ async def debug_cleanup_db(keep_hours: float = 24, truncate_markets: bool = Fals
     return results
 
 
+@app.post("/debug/snapshot-all")
+async def debug_snapshot_all():
+    import time
+    from app.database import async_session_factory
+    from app.services.market_snapshot_service import MarketStateSnapshotService
+
+    async with async_session_factory() as db:
+        service = MarketStateSnapshotService(db)
+        start = time.monotonic()
+        snapshots = await service.snapshot_all_active_markets()
+        elapsed = time.monotonic() - start
+
+    return {
+        "snapshots_created": len(snapshots),
+        "elapsed_seconds": round(elapsed, 3),
+    }
+
+
 # Import and include routers
 from app.api.router import router as api_router
 app.include_router(api_router, prefix="/api/v1")

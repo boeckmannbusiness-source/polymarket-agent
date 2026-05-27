@@ -1,3 +1,4 @@
+import asyncio
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
@@ -5,6 +6,10 @@ from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import Market, MarketEvent, MarketStateSnapshot
+from app.services.market_snapshot_service import MarketStateSnapshotService
+
+_snapshot_locks: dict[str, asyncio.Lock] = {}
+_SNAPSHOT_TTL_SECONDS = 300
 
 
 class MarketEnrichmentService:
@@ -31,6 +36,19 @@ class MarketEnrichmentService:
             .limit(1)
         )
         snapshot = result.scalar_one_or_none()
+
+        if snapshot is None or (now - snapshot.timestamp).total_seconds() > _SNAPSHOT_TTL_SECONDS:
+            lock = _snapshot_locks.setdefault(condition_id, asyncio.Lock())
+            async with lock:
+                result = await self.db.execute(
+                    select(MarketStateSnapshot)
+                    .where(MarketStateSnapshot.market_id == market.id)
+                    .order_by(MarketStateSnapshot.timestamp.desc())
+                    .limit(1)
+                )
+                snapshot = result.scalar_one_or_none()
+                if snapshot is None or (now - snapshot.timestamp).total_seconds() > _SNAPSHOT_TTL_SECONDS:
+                    snapshot = await MarketStateSnapshotService(self.db).snapshot_market(condition_id)
 
         five_min_ago = now - timedelta(minutes=5)
         vol_result = await self.db.execute(
