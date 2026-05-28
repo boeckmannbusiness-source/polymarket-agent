@@ -13,7 +13,7 @@ services:
     environment:
       - APP_ENV=development
     volumes:
-      - ./backend:/app/app
+      - ./backend/app:/app/app
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
@@ -29,7 +29,7 @@ services:
     command: python -m app.ingesters.polymarket_ws
     env_file: .env
     volumes:
-      - ./backend:/app/app
+      - ./backend/app:/app/app
     restart: unless-stopped
     depends_on:
       api:
@@ -43,7 +43,7 @@ services:
     command: python -m app.services.whale_service_worker
     env_file: .env
     volumes:
-      - ./backend:/app/app
+      - ./backend/app:/app/app
     restart: unless-stopped
     depends_on:
       api:
@@ -57,7 +57,7 @@ services:
     command: python -m app.agents.orchestrator
     env_file: .env
     volumes:
-      - ./backend:/app/app
+      - ./backend/app:/app/app
     restart: unless-stopped
     depends_on:
       api:

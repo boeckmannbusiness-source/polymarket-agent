@@ -39,7 +39,13 @@ class RiskAgent(BaseAgent):
 
     async def evaluate_signal(self, msg: dict):
         data = msg.get("data", {})
-        signal_id = data["signal_id"]
+        if not isinstance(data, dict):
+            logger.warning("risk_skip_invalid_data_type", type=type(data).__name__)
+            return
+        signal_id = data.get("signal_id")
+        if not signal_id:
+            logger.warning("risk_skip_missing_signal_id")
+            return
         market_id = data.get("market_id") or data.get("market_condition_id")
         confidence = data.get("confidence", 0.0)
         if confidence is None:

@@ -169,8 +169,8 @@ class EventPersistenceBridge:
                     m = result.scalar_one_or_none()
                     if m:
                         market_id = str(m.id)
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.error("market_lookup_failed_trade", condition_id=condition_id, error=str(e))
 
         ts = _parse_timestamp(data.get("timestamp"))
         price = data.get("price")
@@ -214,8 +214,8 @@ class EventPersistenceBridge:
                     m = result.scalar_one_or_none()
                     if m:
                         market_id = str(m.id)
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.error("market_lookup_failed_price_change", condition_id=condition_id, error=str(e))
 
         ts = _parse_timestamp(data.get("timestamp"))
 
@@ -279,8 +279,8 @@ class EventPersistenceBridge:
             from app.redis import get_redis
             r = await get_redis()
             await r.xadd("market:data:dlq", entry, maxlen=5000)
-        except Exception:
-            pass
+        except Exception as e:
+            logger.error("dlq_publish_failed", event_type=event_type, error=str(e))
 
     # ── Stats ────────────────────────────────────────────────
 

@@ -106,7 +106,7 @@ class AttributionService:
             entry_spread_ratio=entry_spread,
             entry_volume_5m=entry_volume_5m,
             entry_regime=entry_regime or None,
-            entry_archetype=entry_archetype or None,
+            entry_archetype=entry_archetype if entry_archetype else "unknown",
             entry_whale_size=entry_whale,
             exit_price=_float(close_price),
             exit_momentum_1h=exit_mom,

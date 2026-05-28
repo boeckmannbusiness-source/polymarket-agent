@@ -94,7 +94,7 @@ class ExecutionAgent(BaseAgent):
         confidence = data.get("confidence", 0.0)
         strategy = data.get("strategy", "unknown")
 
-        if outcome not in ("YES", "NO"):
+        if not outcome or not isinstance(outcome, str):
             logger.warning("exec_skip_invalid_outcome", signal_id=signal_id, outcome=outcome)
             return
         if side not in ("buy", "sell"):

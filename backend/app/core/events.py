@@ -54,7 +54,8 @@ class EventBus:
         try:
             await r.xgroup_create(stream, group, id="0", mkstream=True)
         except Exception:
-            pass
+            from app.core.logging import logger
+            logger.debug("consumer_group_exists_or_error", stream=stream, group=group)
         return r
 
     @staticmethod

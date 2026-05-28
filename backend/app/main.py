@@ -21,6 +21,11 @@ from app.services.overfitting_detector import OverfittingDetector
 from app.services.survivability_simulator import SurvivabilitySimulator
 from app.services.strategy_pruning_engine import StrategyPruningEngine
 from app.services.capital_efficiency_engine import CapitalEfficiencyEngine
+from app.services.walk_forward_engine import WalkForwardEngine
+from app.services.shadow_trading_service import ShadowTradingService
+from app.services.stress_test_engine import StressTestEngine
+from app.services.live_trading_state_machine import LiveTradingStateMachine
+from app.services.system_health_store import SystemHealthStore
 
 
 _ws_ingester: PolymarketWSIngester | None = None
@@ -62,21 +67,24 @@ async def lifespan(app: FastAPI):
     orchestrator = Orchestrator()
 
     from app.database import async_session_factory
-    async with async_session_factory() as init_db_session:
-        _exit_engine = ExitEngine(init_db_session)
-        _risk_overlay = RiskOverlay(init_db_session)
-        _strategy_guardian = StrategyGuardian(init_db_session)
-        _portfolio_allocator = PortfolioAllocator(init_db_session)
-        _edge_reality_engine = EdgeRealityEngine(init_db_session)
-        _overfitting_detector = OverfittingDetector(init_db_session)
-        _survivability_simulator = SurvivabilitySimulator(init_db_session)
-        _strategy_pruning_engine = StrategyPruningEngine(init_db_session)
-        _capital_efficiency_engine = CapitalEfficiencyEngine(init_db_session)
-        _walk_forward_engine = WalkForwardEngine(init_db_session)
-        _shadow_trading_service = ShadowTradingService(init_db_session)
-        _stress_test_engine = StressTestEngine(init_db_session)
-        _live_state_machine = LiveTradingStateMachine(init_db_session)
-        _system_health_store = SystemHealthStore(init_db_session)
+    try:
+        async with async_session_factory() as init_db_session:
+            _exit_engine = ExitEngine(init_db_session)
+            _risk_overlay = RiskOverlay(init_db_session)
+            _strategy_guardian = StrategyGuardian(init_db_session)
+            _portfolio_allocator = PortfolioAllocator(init_db_session)
+            _edge_reality_engine = EdgeRealityEngine(init_db_session)
+            _overfitting_detector = OverfittingDetector(init_db_session)
+            _survivability_simulator = SurvivabilitySimulator(init_db_session)
+            _strategy_pruning_engine = StrategyPruningEngine(init_db_session)
+            _capital_efficiency_engine = CapitalEfficiencyEngine(init_db_session)
+            _walk_forward_engine = WalkForwardEngine(init_db_session)
+            _shadow_trading_service = ShadowTradingService(init_db_session)
+            _stress_test_engine = StressTestEngine(init_db_session)
+            _live_state_machine = LiveTradingStateMachine(init_db_session)
+            _system_health_store = SystemHealthStore(init_db_session)
+    except Exception as e:
+        logger.warning("service_init_skipped", error=str(e))
 
     bg_tasks = []
 
@@ -419,14 +427,38 @@ app.add_middleware(
 )
 
 
+# ── Production debug guard middleware ───────────────────
+from starlette.middleware.base import BaseHTTPMiddleware
+
+
+class DebugEndpointGuard(BaseHTTPMiddleware):
+    async def dispatch(self, request, call_next):
+        if request.url.path.startswith("/debug/") and settings.APP_ENV in ("production", "staging"):
+            admin_key = request.headers.get("x-admin-key", "")
+            if not settings.ADMIN_API_KEY or admin_key != settings.ADMIN_API_KEY:
+                from fastapi.responses import PlainTextResponse
+                return PlainTextResponse("Not Found", status_code=404)
+        return await call_next(request)
+
+
+app.add_middleware(DebugEndpointGuard)
+
+
 # ── Admin auth ─────────────────────────────────────────
-from fastapi import Header as _Header, HTTPException as _HTTPException
+from fastapi import Header as _Header, HTTPException as _HTTPException, Request as _Request
 
 
 async def _require_admin(x_admin_key: str = _Header(default="")):
     if settings.ADMIN_API_KEY:
         if not x_admin_key or x_admin_key != settings.ADMIN_API_KEY:
             raise _HTTPException(status_code=403, detail="Forbidden")
+
+
+async def _debug_endpoint_guard(request: _Request):
+    if settings.APP_ENV == "production" or settings.APP_ENV == "staging":
+        admin_key = request.headers.get("x-admin-key", "")
+        if not settings.ADMIN_API_KEY or admin_key != settings.ADMIN_API_KEY:
+            raise _HTTPException(status_code=404, detail="Not found")
 
 
 @app.get("/health")

@@ -1,4 +1,5 @@
 import asyncio
+import uuid
 
 from app.agents.base import BaseAgent
 from app.core.events import EventBus
@@ -8,6 +9,7 @@ from app.services.market_enrichment_service import MarketEnrichmentService
 from app.services.signal_service import SignalService
 from app.services.strategy_service import StrategyService
 from app.strategies import get_strategy, get_strategy_names
+from app.models import Signal
 
 
 class SignalAgent(BaseAgent):
@@ -51,6 +53,23 @@ class SignalAgent(BaseAgent):
                                 side = data.get("side", "buy")
                                 outcome = data.get("outcome", "YES")
                                 size = float(data.get("size", data.get("value", 100)) or 100)
+
+                                from uuid import UUID as _UUID
+                                try:
+                                    market_uuid = _UUID(signal.market_id) if isinstance(signal.market_id, str) else None
+                                except (ValueError, AttributeError):
+                                    market_uuid = None
+
+                                created = await signal_service.create_signal(
+                                    market_id=market_uuid,
+                                    signal_type=strategy_name,
+                                    direction=signal.signal,
+                                    confidence=signal.confidence,
+                                    reasoning=signal.reason,
+                                    source_agent=strategy_name,
+                                    source_data=signal.feature_values,
+                                    ttl_minutes=60,
+                                )
 
                                 event_payload = {
                                     "signal_id": str(created.id),

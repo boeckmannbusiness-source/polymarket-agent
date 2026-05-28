@@ -21,7 +21,6 @@ class RiskCheckResult:
 
 
 VALID_SIDES = {"buy", "sell"}
-VALID_OUTCOMES = {"YES", "NO"}
 
 
 class RiskService:
@@ -45,10 +44,11 @@ class RiskService:
 
         if confidence is None:
             confidence = 0.0
-        if confidence < settings.MIN_CONFIDENCE_THRESHOLD:
+        min_confidence = getattr(settings, "MIN_CONFIDENCE_THRESHOLD", 0.6)
+        if confidence < min_confidence:
             return RiskCheckResult(
                 approved=False,
-                reason=f"Confidence {confidence:.2f} below threshold {settings.MIN_CONFIDENCE_THRESHOLD}",
+                reason=f"Confidence {confidence:.2f} below threshold {min_confidence}",
             )
 
         capital = settings.PAPER_INITIAL_CAPITAL

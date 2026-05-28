@@ -85,6 +85,33 @@ class PaperEngine:
             "fee": fee,
         }
 
+    async def evaluate_stop_loss_take_profit(self, trade: Trade) -> str | None:
+        if trade.status != "open" or trade.market_id is None:
+            return None
+        if trade.stop_loss is None and trade.take_profit is None:
+            return None
+
+        market_price = await self._get_latest_market_price(trade.market_id)
+        if market_price is None:
+            return None
+
+        current_outcome_price = self._outcome_price(market_price, trade.outcome)
+        filled_price = trade.filled_price or 0.5
+
+        if trade.stop_loss is not None:
+            if trade.side == "buy" and current_outcome_price <= float(trade.stop_loss):
+                return "stop_loss"
+            if trade.side == "sell" and current_outcome_price >= float(trade.stop_loss):
+                return "stop_loss"
+
+        if trade.take_profit is not None:
+            if trade.side == "buy" and current_outcome_price >= float(trade.take_profit):
+                return "take_profit"
+            if trade.side == "sell" and current_outcome_price <= float(trade.take_profit):
+                return "take_profit"
+
+        return None
+
     async def close_position(self, trade: Trade, exit_price: float | None = None) -> dict[str, Any]:
         if exit_price is None:
             if trade.market_id:

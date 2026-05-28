@@ -7,6 +7,7 @@ from app.strategies.spread_compression import SpreadCompressionStrategy
 from app.strategies.coordinated_wallets import CoordinatedWalletsStrategy
 from app.strategies.momentum_spike import MomentumSpikeStrategy
 from app.strategies.momentum_reversion import MomentumReversionStrategy
+from app.strategies.adaptive_meta import AdaptiveMetaStrategy
 from app.strategies.news_repricing import NewsRepricingStrategy
 from app.strategies.ensemble import EnsembleStrategy
 
@@ -26,7 +27,7 @@ def get_strategy(name: str, config: dict | None = None) -> BaseStrategy:
 
 
 def list_strategies() -> list[dict]:
-    return [cls(name=cls.name, version=cls.version, description=cls.description).get_metadata()
+    return [cls(config=None).get_metadata()
             for cls in _registry.values()]
 
 
@@ -42,6 +43,7 @@ for cls in [
     CoordinatedWalletsStrategy,
     MomentumSpikeStrategy,
     MomentumReversionStrategy,
+    AdaptiveMetaStrategy,
     NewsRepricingStrategy,
     EnsembleStrategy,
 ]:
@@ -59,6 +61,7 @@ __all__ = [
     "CoordinatedWalletsStrategy",
     "MomentumSpikeStrategy",
     "MomentumReversionStrategy",
+    "AdaptiveMetaStrategy",
     "NewsRepricingStrategy",
     "EnsembleStrategy",
     "register_strategy",

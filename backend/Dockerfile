@@ -8,6 +8,7 @@ COPY pyproject.toml .
 RUN mkdir -p backend && pip install --no-cache-dir "."
 
 COPY backend/app/ app/
+COPY backend/scripts/ scripts/
 
 ENV PYTHONPATH=/app \
     PYTHONUNBUFFERED=1 \
