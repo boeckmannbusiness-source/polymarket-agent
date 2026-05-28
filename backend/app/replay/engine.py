@@ -52,6 +52,8 @@ class ReplayedSignal:
     reversal_count: int = 0
     holding_time_seconds: int | None = None
 
+    checkpoint_snapshots: dict = field(default_factory=dict)
+
     execution_slippage: float | None = None
     execution_fill_price: float | None = None
     execution_fill_size: float | None = None
@@ -84,8 +86,10 @@ class PendingOutcome:
             "4h": signal.entry_timestamp + timedelta(hours=4),
         }
         self.checkpoints_met: set[str] = set()
+        self.checkpoint_snapshots: dict[str, dict] = {}
 
-    def evaluate(self, current_timestamp: datetime, outcome_price: float, signal_direction: str):
+    def evaluate(self, current_timestamp: datetime, outcome_price: float, signal_direction: str,
+                 features: dict | None = None):
         if self.entry_price is None or outcome_price is None:
             return
 
@@ -106,6 +110,10 @@ class PendingOutcome:
                 setattr(self.signal, f"outcome_{label}", "WIN" if win else "LOSS" if loss else "FLAT")
                 setattr(self.signal, f"probability_{label}", outcome_price)
                 setattr(self.signal, f"pnl_{label}", movement)
+                if features:
+                    snap = dict(features)
+                    self.checkpoint_snapshots[label] = snap
+                    self.signal.checkpoint_snapshots[label] = snap
 
     @property
     def is_finalized(self) -> bool:
@@ -151,18 +159,29 @@ class ReplayEngine:
             cid = event.market.condition_id if event.market else str(event.market_id)
             if cid not in contexts:
                 outcomes = _parse_outcomes(event.market.outcomes) if event.market and event.market.outcomes else None
-                contexts[cid] = MarketContext(condition_id=cid, market_id=str(event.market_id or ""), outcomes=outcomes)
+                mkt = event.market
+                contexts[cid] = MarketContext(
+                    condition_id=cid,
+                    market_id=str(event.market_id or ""),
+                    outcomes=outcomes,
+                    end_date=mkt.end_date if mkt else None,
+                    created_at=mkt.created_at if mkt else None,
+                    slug=mkt.slug if mkt else None,
+                )
 
             ctx = contexts[cid]
 
             price = float(event.price) if event.price else ctx.current_price
             size = float(event.size) if event.size else 0.0
-            side = event.outcome or "buy"
+            side = event.side or "buy"
+            outcome = event.outcome
             maker = event.maker_address
             taker = event.taker_address
 
             if event.event_type == "trade" and price:
                 ctx.update_trade(event.timestamp, price, size, side, maker, taker)
+                if outcome and isinstance(outcome, str) and outcome.strip():
+                    ctx.outcome_prices[outcome] = price
 
             ts = event.timestamp.replace(tzinfo=timezone.utc) if event.timestamp.tzinfo is None else event.timestamp
 
@@ -182,8 +201,9 @@ class ReplayEngine:
                     "wallet": taker or maker or "",
                     "size": size,
                     "side": side,
-                    "wallet_score": 0.65,
-                    "recency_hours": 0,
+                    "outcome": outcome,
+                    "wallet_score": None,
+                    "recency_hours": None,
                 }
 
                 try:
@@ -230,7 +250,10 @@ class ReplayEngine:
             for po in pending_by_cid.get(cid, []):
                 outcome_price = ctx.get_outcome_price(po.signal.signal)
                 if po.entry_price is not None and outcome_price is not None:
-                    po.evaluate(ts, outcome_price, po.signal.signal)
+                    features = self.feature_generator.generate(ctx)
+                    features["market_id"] = ctx.market_id
+                    features["condition_id"] = ctx.condition_id
+                    po.evaluate(ts, outcome_price, po.signal.signal, features=features)
                 if not po.is_finalized:
                     still_pending.append(po)
             pending_by_cid[cid] = still_pending
@@ -239,7 +262,10 @@ class ReplayEngine:
             for po in pending_by_cid.get(event_cid, []):
                 outcome_price = ctx.get_outcome_price(po.signal.signal)
                 if po.entry_price is not None and outcome_price is not None:
-                    po.evaluate(ts, outcome_price, po.signal.signal)
+                    features = self.feature_generator.generate(ctx)
+                    features["market_id"] = ctx.market_id
+                    features["condition_id"] = ctx.condition_id
+                    po.evaluate(ts, outcome_price, po.signal.signal, features=features)
                     po.signal.outcome_close = po.signal.outcome_1h or po.signal.outcome_15m or "TIMEOUT"
                     prob_close = po.signal.probability_1h or po.signal.probability_15m or outcome_price
                     po.signal.probability_close = prob_close

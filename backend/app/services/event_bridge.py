@@ -189,7 +189,8 @@ class EventPersistenceBridge:
                     price=_safe_float(price),
                     size=_safe_float(size),
                     maker_address=data.get("wallet") or data.get("maker"),
-                    outcome=data.get("outcome") or data.get("side"),
+                    side=data.get("side"),
+                    outcome=data.get("outcome"),
                     transaction_hash=data.get("transaction_hash") or data.get("tx_hash"),
                     timestamp=ts,
                 )

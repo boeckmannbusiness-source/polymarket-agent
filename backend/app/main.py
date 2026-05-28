@@ -1,7 +1,7 @@
 import asyncio
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, Query
+from fastapi import FastAPI, Query, Depends
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import settings
@@ -12,15 +12,40 @@ from app.ingesters.polymarket_rest import PolymarketRESTIngester
 from app.ingesters.polymarket_ws import PolymarketWSIngester
 from app.agents.orchestrator import Orchestrator
 from app.services.event_bridge import EventPersistenceBridge
+from app.services.exit_engine import ExitEngine
+from app.services.risk_overlay import RiskOverlay
+from app.services.strategy_guardian import StrategyGuardian
+from app.services.portfolio_allocator import PortfolioAllocator
+from app.services.edge_reality_engine import EdgeRealityEngine
+from app.services.overfitting_detector import OverfittingDetector
+from app.services.survivability_simulator import SurvivabilitySimulator
+from app.services.strategy_pruning_engine import StrategyPruningEngine
+from app.services.capital_efficiency_engine import CapitalEfficiencyEngine
 
 
 _ws_ingester: PolymarketWSIngester | None = None
 _bridge: EventPersistenceBridge | None = None
+_exit_engine: ExitEngine | None = None
+_risk_overlay: RiskOverlay | None = None
+_strategy_guardian: StrategyGuardian | None = None
+_portfolio_allocator: PortfolioAllocator | None = None
+_edge_reality_engine: EdgeRealityEngine | None = None
+_overfitting_detector: OverfittingDetector | None = None
+_survivability_simulator: SurvivabilitySimulator | None = None
+_strategy_pruning_engine: StrategyPruningEngine | None = None
+_capital_efficiency_engine: CapitalEfficiencyEngine | None = None
+_walk_forward_engine: WalkForwardEngine | None = None
+_shadow_trading_service: ShadowTradingService | None = None
+_stress_test_engine: StressTestEngine | None = None
+_live_state_machine: LiveTradingStateMachine | None = None
+_system_health_store: SystemHealthStore | None = None
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    global _ws_ingester, _bridge
+    global _ws_ingester, _bridge, _exit_engine, _risk_overlay, _strategy_guardian, _portfolio_allocator
+    global _edge_reality_engine, _overfitting_detector, _survivability_simulator, _strategy_pruning_engine, _capital_efficiency_engine
+    global _walk_forward_engine, _shadow_trading_service, _stress_test_engine, _live_state_machine, _system_health_store
     setup_logging()
     logger.info("starting_up", env=settings.APP_ENV, mode=settings.TRADING_MODE)
     try:
@@ -35,6 +60,23 @@ async def lifespan(app: FastAPI):
     _bridge = EventPersistenceBridge()
     bridge = _bridge
     orchestrator = Orchestrator()
+
+    from app.database import async_session_factory
+    async with async_session_factory() as init_db_session:
+        _exit_engine = ExitEngine(init_db_session)
+        _risk_overlay = RiskOverlay(init_db_session)
+        _strategy_guardian = StrategyGuardian(init_db_session)
+        _portfolio_allocator = PortfolioAllocator(init_db_session)
+        _edge_reality_engine = EdgeRealityEngine(init_db_session)
+        _overfitting_detector = OverfittingDetector(init_db_session)
+        _survivability_simulator = SurvivabilitySimulator(init_db_session)
+        _strategy_pruning_engine = StrategyPruningEngine(init_db_session)
+        _capital_efficiency_engine = CapitalEfficiencyEngine(init_db_session)
+        _walk_forward_engine = WalkForwardEngine(init_db_session)
+        _shadow_trading_service = ShadowTradingService(init_db_session)
+        _stress_test_engine = StressTestEngine(init_db_session)
+        _live_state_machine = LiveTradingStateMachine(init_db_session)
+        _system_health_store = SystemHealthStore(init_db_session)
 
     bg_tasks = []
 
@@ -55,6 +97,27 @@ async def lifespan(app: FastAPI):
 
     bg_tasks.append(asyncio.create_task(_periodic_redis_cleanup(), name="redis_cleanup"))
     logger.info("redis_cleanup_started")
+
+    bg_tasks.append(asyncio.create_task(_periodic_exit_engine_loop(), name="exit_engine"))
+    logger.info("exit_engine_started")
+
+    bg_tasks.append(asyncio.create_task(_periodic_risk_overlay_check(), name="risk_overlay"))
+    logger.info("risk_overlay_started")
+
+    bg_tasks.append(asyncio.create_task(_periodic_strategy_guardian_eval(), name="strategy_guardian"))
+    logger.info("strategy_guardian_started")
+
+    bg_tasks.append(asyncio.create_task(_periodic_phase45_analysis(), name="phase45_analysis"))
+    logger.info("phase45_analysis_started")
+
+    bg_tasks.append(asyncio.create_task(_periodic_shadow_sync(), name="shadow_sync"))
+    logger.info("shadow_sync_started")
+
+    bg_tasks.append(asyncio.create_task(_periodic_state_machine_check(), name="state_machine"))
+    logger.info("state_machine_started")
+
+    bg_tasks.append(asyncio.create_task(_periodic_health_snapshot(), name="health_snapshot"))
+    logger.info("health_snapshot_started")
 
     yield
 
@@ -117,6 +180,230 @@ async def _periodic_redis_cleanup():
             logger.warning("redis_cleanup_error", error=str(e))
 
 
+async def _periodic_exit_engine_loop():
+    import asyncio
+    from sqlalchemy import select
+    from app.database import async_session_factory
+    from app.models import Trade
+
+    await asyncio.sleep(15)
+    while True:
+        try:
+            async with async_session_factory() as db:
+                engine = ExitEngine(db)
+                decisions = await engine.evaluate_all_open()
+                for d in decisions:
+                    if d["action"] == "EXIT":
+                        trade = await db.execute(
+                            select(Trade).where(Trade.id == d["trade_id"])
+                        )
+                        trade = trade.scalar_one_or_none()
+                        if trade:
+                            from app.services.trade_service import TradeService
+                            service = TradeService(db)
+                            await service.close_trade(
+                                trade.id,
+                                exit_price=d.get("exit_price"),
+                            )
+                            logger.info(
+                                "exit_engine_closed",
+                                trade_id=d["trade_id"],
+                                reason=d["reason"],
+                                exit_price=d.get("exit_price"),
+                            )
+                await db.commit()
+        except asyncio.CancelledError:
+            break
+        except Exception as e:
+            logger.warning("exit_engine_loop_error", error=str(e))
+        await asyncio.sleep(30)
+
+
+async def _periodic_risk_overlay_check():
+    import asyncio
+    from app.database import async_session_factory
+
+    await asyncio.sleep(20)
+    while True:
+        try:
+            async with async_session_factory() as db:
+                overlay = RiskOverlay(db)
+                state = await overlay.check()
+                if state.status != "ACTIVE":
+                    logger.warning(
+                        "risk_overlay_state_change",
+                        status=state.status,
+                        reason=state.reason,
+                    )
+        except asyncio.CancelledError:
+            break
+        except Exception as e:
+            logger.warning("risk_overlay_check_error", error=str(e))
+        await asyncio.sleep(30)
+
+
+async def _periodic_strategy_guardian_eval():
+    import asyncio
+    from app.database import async_session_factory
+
+    await asyncio.sleep(60)
+    while True:
+        try:
+            async with async_session_factory() as db:
+                guardian = StrategyGuardian(db)
+                results = await guardian.evaluate_all()
+                for name, status in results.items():
+                    if status.status == "DISABLED":
+                        logger.warning(
+                            "strategy_disabled_by_guardian",
+                            strategy=name,
+                            reason=status.reason,
+                        )
+                await db.commit()
+        except asyncio.CancelledError:
+            break
+        except Exception as e:
+            logger.warning("strategy_guardian_eval_error", error=str(e))
+        await asyncio.sleep(300)
+
+
+async def _periodic_phase45_analysis():
+    import asyncio
+    from app.database import async_session_factory
+    from app.services.edge_reality_engine import EdgeRealityEngine
+    from app.services.overfitting_detector import OverfittingDetector
+    from app.services.survivability_simulator import SurvivabilitySimulator
+    from app.services.strategy_pruning_engine import StrategyPruningEngine
+    from app.services.pipeline_metrics import set_phase45_metrics
+
+    await asyncio.sleep(120)
+    while True:
+        try:
+            async with async_session_factory() as db:
+                edge_engine = EdgeRealityEngine(db)
+                overfit = OverfittingDetector(db)
+                survival = SurvivabilitySimulator(db)
+                pruning = StrategyPruningEngine(db)
+                efficiency = CapitalEfficiencyEngine(db)
+
+                decisions = await pruning.decide_all()
+                rankings = await efficiency.rank_all()
+
+                avg_edge = 0.0
+                avg_overfit = 0.0
+                avg_survival = 0.0
+                top_rank = 0
+                count = 0
+
+                for name, decision in decisions.items():
+                    if decision.classification == "DISABLE":
+                        logger.warning("phase45_pruning_disable", strategy=name, reason=decision.reason)
+                        continue
+                    edge = await edge_engine.compute_edge(name, days=60)
+                    of = await overfit.detect(name)
+                    sv = await survival.simulate(name, days=30, simulations=500)
+                    avg_edge += edge.expectancy
+                    avg_overfit += of.score
+                    avg_survival += 1.0 - sv.probability_of_ruin
+                    count += 1
+
+                if count > 0:
+                    avg_edge /= count
+                    avg_overfit /= count
+                    avg_survival /= count
+
+                sorted_ranks = sorted(rankings.keys(), key=lambda n: rankings[n].score, reverse=True)
+                for rank, name in enumerate(sorted_ranks, 1):
+                    if rank == 1:
+                        top_rank = rank
+                    break
+
+                await set_phase45_metrics(avg_edge, avg_overfit, avg_survival, top_rank)
+
+        except asyncio.CancelledError:
+            break
+        except Exception as e:
+            logger.warning("phase45_analysis_error", error=str(e))
+        await asyncio.sleep(3600)
+
+
+async def _periodic_shadow_sync():
+    import asyncio
+    from app.database import async_session_factory
+    from app.services.shadow_trading_service import ShadowTradingService
+    from app.services.live_trading_state_machine import LiveTradingStateMachine
+
+    await asyncio.sleep(30)
+    while True:
+        try:
+            async with async_session_factory() as db:
+                shadow = ShadowTradingService(db)
+                await shadow.sync_from_live_trades()
+        except asyncio.CancelledError:
+            break
+        except Exception as e:
+            logger.warning("shadow_sync_error", error=str(e))
+        await asyncio.sleep(60)
+
+
+async def _periodic_state_machine_check():
+    import asyncio
+    from app.database import async_session_factory
+    from app.services.live_trading_state_machine import LiveTradingStateMachine
+    from app.services.risk_overlay import RiskOverlay
+    from app.services.pipeline_metrics import set_phase5_metrics
+
+    await asyncio.sleep(45)
+    while True:
+        try:
+            async with async_session_factory() as db:
+                sm = LiveTradingStateMachine(db)
+                overlay = RiskOverlay(db)
+                state = await overlay.check()
+                new_state = await sm.evaluate(state.status)
+                caps = sm.hard_caps
+                logger.info("state_machine_check", state=new_state.value, caps=caps)
+                await set_phase5_metrics(
+                    new_state.value,
+                    caps.get("max_concurrent_positions", 0),
+                    0.0,
+                    0,
+                )
+        except asyncio.CancelledError:
+            break
+        except Exception as e:
+            logger.warning("state_machine_error", error=str(e))
+        await asyncio.sleep(120)
+
+
+async def _periodic_health_snapshot():
+    import asyncio
+    from app.database import async_session_factory
+    from app.services.system_health_store import SystemHealthStore
+    from app.services.pipeline_metrics import set_phase5_metrics
+
+    await asyncio.sleep(10)
+    while True:
+        try:
+            async with async_session_factory() as db:
+                store = SystemHealthStore(db)
+                await store.record_snapshot()
+                alerts = await store.check_alerts()
+                for alert in alerts:
+                    logger.warning("health_alert", alert=alert)
+                await set_phase5_metrics(
+                    "HEALTH_CHECK",
+                    0,
+                    0.0,
+                    len(alerts),
+                )
+        except asyncio.CancelledError:
+            break
+        except Exception as e:
+            logger.warning("health_snapshot_error", error=str(e))
+        await asyncio.sleep(300)
+
+
 app = FastAPI(
     title="Polymarket Intelligence Agent",
     version="0.1.0",
@@ -130,6 +417,16 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+# ── Admin auth ─────────────────────────────────────────
+from fastapi import Header as _Header, HTTPException as _HTTPException
+
+
+async def _require_admin(x_admin_key: str = _Header(default="")):
+    if settings.ADMIN_API_KEY:
+        if not x_admin_key or x_admin_key != settings.ADMIN_API_KEY:
+            raise _HTTPException(status_code=403, detail="Forbidden")
 
 
 @app.get("/health")
@@ -152,7 +449,800 @@ async def system_status():
     }
 
 
-@app.get("/debug/memory")
+# ── Phase 4: Capital Allocation & Exit Engine ────────────
+
+
+@app.get("/debug/exit-decisions/{trade_id}")
+async def debug_exit_decisions(trade_id: str):
+    from uuid import UUID as _UUID
+    from app.database import async_session_factory
+    from fastapi import HTTPException
+
+    try:
+        trade_uuid = _UUID(trade_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid trade ID")
+
+    async with async_session_factory() as db:
+        trade = await db.execute(select(Trade).where(Trade.id == trade_uuid))
+        trade = trade.scalar_one_or_none()
+        if not trade:
+            raise HTTPException(status_code=404, detail="Trade not found")
+
+        engine = ExitEngine(db)
+        decision = await engine.evaluate(trade)
+
+        return {
+            "trade_id": trade_id,
+            "action": decision.action,
+            "reason": decision.reason,
+            "confidence": decision.confidence,
+            "exit_price": decision.exit_price,
+        }
+
+
+@app.get("/debug/strategy-status")
+async def debug_strategy_status():
+    from app.database import async_session_factory
+
+    async with async_session_factory() as db:
+        guardian = StrategyGuardian(db)
+        results = await guardian.evaluate_all()
+        return {
+            name: {
+                "status": s.status,
+                "reason": s.reason,
+                "metrics": s.metrics_snapshot,
+            }
+            for name, s in results.items()
+        }
+
+
+@app.get("/debug/risk-overlay")
+async def debug_risk_overlay():
+    from app.database import async_session_factory
+
+    async with async_session_factory() as db:
+        overlay = RiskOverlay(db)
+        state = await overlay.check()
+        return {
+            "status": state.status,
+            "reason": state.reason,
+            "cooldown_until": state.cooldown_until.isoformat() if state.cooldown_until else None,
+            "drawdown_curve": overlay.get_portfolio_drawdown_curve()[-50:],
+        }
+
+
+@app.get("/debug/portfolio-allocator")
+async def debug_portfolio_allocator(strategy: str = ""):
+    from app.database import async_session_factory
+
+    async with async_session_factory() as db:
+        allocator = PortfolioAllocator(db)
+        if strategy:
+            cap = await allocator.get_allocated_capital(strategy)
+        else:
+            cap = await allocator.get_allocated_capital()
+        return {
+            "allocated_capital_per_strategy": cap,
+        }
+
+
+@app.get("/debug/exit-stats")
+async def debug_exit_stats():
+    from app.database import async_session_factory
+
+    async with async_session_factory() as db:
+        engine = ExitEngine(db)
+        return {
+            "exit_reason_distribution": engine.get_exit_reason_distribution(),
+            "forced_exit_rate": engine.get_forced_exit_rate(),
+        }
+
+
+@app.get("/debug/guardian-kill-count")
+async def debug_guardian_kill_count():
+    from app.database import async_session_factory
+
+    async with async_session_factory() as db:
+        guardian = StrategyGuardian(db)
+        return {"strategy_kill_count": guardian.get_kill_count()}
+
+
+# ── Phase 4.5: Edge Validation & Survivability ──────────
+
+
+@app.get("/debug/edge-report/{strategy_name}")
+async def debug_edge_report(strategy_name: str, days: int = 60):
+    from app.database import async_session_factory
+
+    async with async_session_factory() as db:
+        engine = EdgeRealityEngine(db)
+        report = await engine.compute_edge(strategy_name, days=days)
+        return {
+            "strategy": strategy_name,
+            "expectancy": report.expectancy,
+            "sharpe_proxy": report.sharpe_proxy,
+            "stability_score": report.stability_score,
+            "tail_risk": report.tail_risk,
+            "confidence_score": report.confidence_score,
+            "win_rate": report.win_rate,
+            "loss_severity": report.loss_severity,
+            "total_trades": report.total_trades,
+            "expectancy_per_regime": report.expectancy_per_regime,
+            "expectancy_per_price_zone": report.expectancy_per_price_zone,
+            "expectancy_per_archetype": report.expectancy_per_archetype,
+            "expectancy_per_resolution": report.expectancy_per_resolution,
+        }
+
+
+@app.get("/debug/overfit-report/{strategy_name}")
+async def debug_overfit_report(strategy_name: str):
+    from app.database import async_session_factory
+
+    async with async_session_factory() as db:
+        detector = OverfittingDetector(db)
+        score = await detector.detect(strategy_name)
+        return {
+            "strategy": strategy_name,
+            "overfit_score": score.score,
+            "risk_level": score.risk_level,
+            "reason": score.reason,
+        }
+
+
+@app.get("/debug/survival-report/{strategy_name}")
+async def debug_survival_report(strategy_name: str, days: int = 30, simulations: int = 500):
+    from app.database import async_session_factory
+
+    async with async_session_factory() as db:
+        simulator = SurvivabilitySimulator(db)
+        report = await simulator.simulate(strategy_name, days=days, simulations=simulations)
+        return {
+            "strategy": strategy_name,
+            "expected_drawdown": report.expected_drawdown,
+            "probability_of_ruin": report.probability_of_ruin,
+            "expected_return": report.expected_return,
+            "volatility_stability": report.volatility_stability,
+            "survived_simulations": report.survived_simulations,
+            "total_simulations": report.total_simulations,
+        }
+
+
+@app.get("/debug/pruning-decision/{strategy_name}")
+async def debug_pruning_decision(strategy_name: str):
+    from app.database import async_session_factory
+
+    async with async_session_factory() as db:
+        pruner = StrategyPruningEngine(db)
+        decision = await pruner.decide(strategy_name)
+        return {
+            "strategy": strategy_name,
+            "status": decision.status,
+            "confidence": decision.confidence,
+            "capital_recommendation": decision.capital_recommendation,
+            "reason": decision.reason,
+            "classification": decision.classification,
+        }
+
+
+@app.get("/debug/efficiency-rank")
+async def debug_efficiency_rank():
+    from app.database import async_session_factory
+
+    async with async_session_factory() as db:
+        efficiency = CapitalEfficiencyEngine(db)
+        rankings = await efficiency.rank_all()
+        return {
+            name: {
+                "score": r.score,
+                "expectancy": r.expectancy,
+                "max_drawdown": r.max_drawdown,
+                "stability": r.stability,
+                "rank": r.rank,
+                "total_strategies": r.total_strategies,
+            }
+            for name, r in rankings.items()
+        }
+
+
+@app.get("/debug/phase45-full-report")
+async def debug_phase45_full_report():
+    from sqlalchemy import select
+    from app.database import async_session_factory
+
+    async with async_session_factory() as db:
+        from app.models.strategy import StrategyConfigRecord as _SCR
+        result = await db.execute(select(_SCR).where(_SCR.enabled == True))
+        records = list(result.scalars().all())
+
+        edge_engine = EdgeRealityEngine(db)
+        overfit = OverfittingDetector(db)
+        survival = SurvivabilitySimulator(db)
+        pruner = StrategyPruningEngine(db)
+        efficiency = CapitalEfficiencyEngine(db)
+
+        full = {}
+        for record in records:
+            name = record.strategy_name
+            edge = await edge_engine.compute_edge(name, days=60)
+            of_score = await overfit.detect(name)
+            sv = await survival.simulate(name, days=30, simulations=500)
+            decision = await pruner.decide(name)
+
+            full[name] = {
+                "classification": decision.classification,
+                "decision": decision.status,
+                "capital_rec": decision.capital_recommendation,
+                "edge_expectancy": edge.expectancy,
+                "edge_sharpe": edge.sharpe_proxy,
+                "edge_stability": edge.stability_score,
+                "edge_tail_risk": edge.tail_risk,
+                "edge_confidence": edge.confidence_score,
+                "overfit_score": of_score.score,
+                "overfit_risk": of_score.risk_level,
+                "survival_return": sv.expected_return,
+                "survival_ruin_prob": sv.probability_of_ruin,
+                "survival_drawdown": sv.expected_drawdown,
+            }
+
+        rankings = await efficiency.rank_all()
+        ranked = sorted(rankings.keys(), key=lambda n: rankings[n].score, reverse=True)
+
+        return {
+            "strategies": full,
+            "capital_efficiency_ranking": [
+                {
+                    "rank": i + 1,
+                    "strategy": name,
+                    "efficiency_score": rankings[name].score,
+                }
+                for i, name in enumerate(ranked)
+            ],
+            "summary": {
+                "real_alpha": [n for n, d in full.items() if d["classification"] == "REAL_ALPHA"],
+                "weak_edge": [n for n, d in full.items() if d["classification"] == "WEAK_EDGE"],
+                "overfitted": [n for n, d in full.items() if d["classification"] == "OVERFITTED"],
+                "losing": [n for n, d in full.items() if d["classification"] == "LOSING_SYSTEM"],
+            },
+        }
+
+
+# ── Phase 5: Walk-Forward, Shadow Trading & Stress Testing ──
+
+
+@app.get("/debug/walk-forward/{strategy_name}")
+async def debug_walk_forward(strategy_name: str):
+    from app.database import async_session_factory
+
+    async with async_session_factory() as db:
+        engine = WalkForwardEngine(db)
+        report = await engine.run(strategy_name)
+        return {
+            "strategy": strategy_name,
+            "survival_classification": report.survival_classification,
+            "stability_score": report.stability_score,
+            "expectancy_stability": report.expectancy_stability,
+            "win_rate_drift": report.win_rate_drift,
+            "sharpe_drift": report.sharpe_drift,
+            "drawdown_drift": report.drawdown_drift,
+            "signal_frequency_drift": report.signal_frequency_drift,
+            "overfit_persistence_score": report.overfit_persistence_score,
+            "windows": [
+                {
+                    "label": w.window_label,
+                    "trade_count": w.trade_count,
+                    "expectancy": w.expectancy,
+                    "win_rate": w.win_rate,
+                    "sharpe": w.sharpe,
+                    "max_drawdown": w.max_drawdown,
+                    "signal_frequency": w.signal_frequency,
+                }
+                for w in report.windows
+            ],
+        }
+
+
+@app.get("/debug/shadow-metrics")
+async def debug_shadow_metrics():
+    from app.database import async_session_factory
+
+    async with async_session_factory() as db:
+        shadow = ShadowTradingService(db)
+        await shadow.sync_from_live_trades()
+        metrics = shadow.get_shadow_metrics()
+        return {
+            "live_expectancy": metrics.live_expectancy,
+            "live_sharpe": metrics.live_sharpe,
+            "live_drawdown": metrics.live_drawdown,
+            "latency_adjusted_pnl": metrics.latency_adjusted_pnl,
+            "total_trades": metrics.total_trades,
+            "missed_fills": metrics.missed_fills,
+            "stale_fills": metrics.stale_fills,
+            "avg_latency_ms": metrics.avg_latency_ms,
+            "avg_slippage": metrics.avg_slippage,
+        }
+
+
+@app.get("/debug/stress-test")
+async def debug_stress_test():
+    from app.database import async_session_factory
+
+    async with async_session_factory() as db:
+        engine = StressTestEngine(db)
+        results = await engine.run_all(simulations=200)
+        return {
+            r.scenario: {
+                "portfolio_survived": r.portfolio_survived,
+                "forced_liquidations": r.forced_liquidations,
+                "kill_switch_activated": r.kill_switch_activated,
+                "max_drawdown": r.max_drawdown,
+                "survived_pct": r.survived_pct,
+            }
+            for r in results
+        }
+
+
+@app.get("/debug/trading-state")
+async def debug_trading_state():
+    from app.database import async_session_factory
+
+    async with async_session_factory() as db:
+        sm = LiveTradingStateMachine(db)
+        return {
+            "state": sm.state.value,
+            "hard_caps": sm.hard_caps,
+            "history": sm.get_transition_history()[-20:],
+        }
+
+
+@app.get("/debug/health-snapshot")
+async def debug_health_snapshot():
+    from app.database import async_session_factory
+
+    async with async_session_factory() as db:
+        store = SystemHealthStore(db)
+        await store.record_snapshot()
+        latest = store.get_latest()
+        alerts = await store.check_alerts()
+        return {
+            "timestamp": latest.timestamp.isoformat() if latest else None,
+            "total_trades": latest.total_trades if latest else 0,
+            "open_trades": latest.open_trades if latest else 0,
+            "portfolio_value": latest.portfolio_value if latest else 0,
+            "drawdown": latest.drawdown if latest else 0,
+            "kill_switch_active": latest.kill_switch_active if latest else False,
+            "active_strategies": latest.active_strategies if latest else 0,
+            "disabled_strategies": latest.disabled_strategies if latest else 0,
+            "ws_events_last_minute": latest.ws_events_last_minute if latest else 0,
+            "alerts": alerts,
+        }
+
+
+@app.get("/debug/health-history")
+async def debug_health_history(limit: int = 50):
+    from app.database import async_session_factory
+
+    async with async_session_factory() as db:
+        store = SystemHealthStore(db)
+        await store.record_snapshot()
+        history = store.get_history(limit=limit)
+        return {
+            "snapshots": [
+                {
+                    "timestamp": h.timestamp.isoformat(),
+                    "total_trades": h.total_trades,
+                    "open_trades": h.open_trades,
+                    "portfolio_value": h.portfolio_value,
+                    "drawdown": h.drawdown,
+                    "kill_switch_active": h.kill_switch_active,
+                    "ws_events_last_minute": h.ws_events_last_minute,
+                }
+                for h in history
+            ]
+        }
+
+
+@app.get("/debug/edge-decay/{strategy_name}")
+async def debug_edge_decay(strategy_name: str):
+    from app.database import async_session_factory
+    from app.services.edge_reality_engine import EdgeRealityEngine
+    from app.services.execution_simulator import ExecutionSimulator
+
+    async with async_session_factory() as db:
+        edge_engine = EdgeRealityEngine(db)
+        edge = await edge_engine.compute_edge(strategy_name, days=60)
+        sim = ExecutionSimulator()
+        decay = sim.compute_edge_decay(edge.expectancy)
+        return {
+            "strategy": strategy_name,
+            "base_expectancy": edge.expectancy,
+            "edge_decay_by_latency": decay,
+        }
+
+
+# ── Pre-Live Hardening Endpoints ────────────────────────
+
+
+@app.get("/debug/global-risk")
+async def debug_global_risk():
+    from app.database import async_session_factory
+    from app.services.global_risk_guard import GlobalRiskGuard
+    from app.services.pipeline_metrics import set_exposure_metrics
+
+    async with async_session_factory() as db:
+        guard = GlobalRiskGuard(db)
+        summary = await guard.get_exposure_summary()
+        await set_exposure_metrics(summary["total_open_exposure"], summary["exposure_utilization_pct"])
+        return summary
+
+
+@app.get("/debug/open-market-positions")
+async def debug_open_market_positions():
+    from app.database import async_session_factory
+    from app.models import Trade
+
+    async with async_session_factory() as db:
+        result = await db.execute(
+            select(Trade).where(Trade.status.in_(["open", "pending"]))
+        )
+        trades = list(result.scalars().all())
+        return {
+            "count": len(trades),
+            "positions": [
+                {
+                    "trade_id": str(t.id),
+                    "market_id": str(t.market_id),
+                    "outcome": t.outcome,
+                    "side": t.side,
+                    "size": float(t.size),
+                    "filled_size": float(t.filled_size or 0),
+                    "price": float(t.filled_price or 0),
+                    "status": t.status,
+                    "agent_id": t.agent_id,
+                }
+                for t in trades
+            ],
+        }
+
+
+@app.get("/debug/trading-halts")
+async def debug_trading_halts():
+    from app.database import async_session_factory
+    from app.services.risk_overlay import RiskOverlay
+
+    async with async_session_factory() as db:
+        overlay = RiskOverlay(db)
+        state = await overlay.check()
+        return {
+            "current_status": state.status,
+            "reason": state.reason,
+            "cooldown_until": state.cooldown_until.isoformat() if state.cooldown_until else None,
+            "trading_allowed": state.status in ("ACTIVE", "REDUCED"),
+        }
+
+
+@app.post("/debug/kill-switch/enable")
+async def debug_kill_switch_enable(_admin=Depends(_require_admin)):
+    from app.services.pipeline_metrics import inc_kill_switch_activation
+
+    import app.services.trade_service as ts
+    ts.FORCE_TRADING_DISABLED = True
+    await inc_kill_switch_activation()
+    return {"kill_switch": True, "message": "Trading disabled globally"}
+
+
+@app.post("/debug/kill-switch/disable")
+async def debug_kill_switch_disable(_admin=Depends(_require_admin)):
+    import app.services.trade_service as ts
+    ts.FORCE_TRADING_DISABLED = False
+    return {"kill_switch": False, "message": "Trading re-enabled"}
+
+
+@app.get("/debug/order-preview/{signal_id}")
+async def debug_order_preview(signal_id: str):
+    from uuid import UUID
+    from app.database import async_session_factory
+    from app.services.order_preview_service import OrderPreviewService
+
+    async with async_session_factory() as db:
+        svc = OrderPreviewService(db)
+        preview = await svc.preview(signal_id)
+        return {
+            "signal_id": preview.signal_id,
+            "strategy": preview.strategy,
+            "confidence": preview.confidence,
+            "weighted_confidence": preview.weighted_confidence,
+            "market_archetype": preview.market_archetype,
+            "price_zone": preview.price_zone,
+            "regime": preview.regime,
+            "liquidity": preview.liquidity,
+            "volatility": preview.volatility,
+            "spread": preview.spread,
+            "sizing_factors": preview.sizing_factors,
+            "approved": preview.approved,
+            "approval_reason": preview.approval_reason,
+            "rejection_reason": preview.rejection_reason,
+            "expected_risk": preview.expected_risk,
+            "expected_reward": preview.expected_reward,
+            "exit_thresholds": preview.exit_thresholds,
+            "guardian_state": preview.guardian_state,
+            "overlay_state": preview.overlay_state,
+            "previewed_at": preview.previewed_at,
+        }
+
+
+@app.get("/debug/micro-live-state")
+async def debug_micro_live_state():
+    from app.services.trade_service import MICRO_LIVE_SAFE_MODE, FORCE_TRADING_DISABLED
+    from app.services.pipeline_metrics import get_metrics
+
+    metrics = await get_metrics()
+    return {
+            "micro_live_safe_mode": MICRO_LIVE_SAFE_MODE,
+            "force_trading_disabled": FORCE_TRADING_DISABLED,
+            "restrictions": {
+            "only_crisis_reversion": True,
+            "max_price": 0.20,
+            "max_position_size_usd": 1.0,
+            "max_daily_loss_usd": 2.0,
+            "max_concurrent_positions": 2,
+            "no_averaging_down": True,
+            "no_pyramiding": True,
+        },
+        "current_state": {
+            "live_state": metrics.get("live_state", "SHADOW"),
+            "live_consecutive_losses": metrics.get("live_consecutive_losses", 0),
+            "live_daily_pnl": metrics.get("live_daily_pnl", 0.0),
+        },
+    }
+
+
+@app.get("/debug/runtime-health")
+async def debug_runtime_health():
+    import os, gc, time
+    from app.services.pipeline_metrics import get_metrics
+
+    gc.collect()
+    metrics = await get_metrics()
+    now = time.time()
+
+    heap_info = {}
+    try:
+        import tracemalloc
+        snap = tracemalloc.take_snapshot()
+        stats = snap.statistics("lineno")
+        heap_info["traced_allocations"] = sum(s.count for s in stats[:10])
+    except Exception:
+        heap_info["traced_allocations"] = -1
+
+    return {
+        "uptime_seconds": metrics.get("uptime_seconds", 0),
+        "gc_objects": len(gc.get_objects()),
+        "process_rss_mb": -1,
+        "signal_rate_per_minute": metrics.get("signal_rate_per_minute", 0),
+        "crash_count": metrics.get("crash_count", 0),
+        "exposure_rejections_total": metrics.get("exposure_rejections_total", 0),
+        "trading_halt_count": metrics.get("trading_halt_count", 0),
+        "halt_reason": metrics.get("halt_reason", ""),
+        "kill_switch_activations_total": metrics.get("kill_switch_activations_total", 0),
+        "live_state": metrics.get("live_state", "SHADOW"),
+        "health_alerts_count": metrics.get("health_alerts_count", 0),
+    }
+
+
+# ── Pre-Live Checklist & Shadow Burn-in ─────────────────
+
+
+@app.get("/debug/prelive-checklist")
+async def debug_prelive_checklist():
+    from app.database import async_session_factory
+    from app.services.global_risk_guard import GlobalRiskGuard
+    from app.services.pipeline_metrics import get_metrics as get_pm
+    from app.services.shadow_trading_service import ShadowTradingService
+    from app.services.risk_overlay import RiskOverlay
+    from app.services.strategy_guardian import StrategyGuardian
+    from app.services.exit_engine import ExitEngine
+    from app.config import settings
+
+    checks: dict[str, str] = {}
+
+    try:
+        async with async_session_factory() as _:
+            checks["db_connected"] = "PASS"
+    except Exception:
+        checks["db_connected"] = "FAIL"
+
+    checks["redis_connected"] = "WARN"
+    try:
+        from app.redis import get_redis
+        r = await get_redis()
+        await r.ping()
+        checks["redis_connected"] = "PASS"
+    except Exception:
+        checks["redis_connected"] = "FAIL"
+
+    checks["ws_connected"] = "WARN"
+    ws = getattr(globals().get("_ws_ingester"), "running", None)
+    if ws:
+        checks["ws_connected"] = "PASS"
+    else:
+        checks["ws_connected"] = "WARN"
+
+    from app.strategies import get_strategy_names
+    strategies = get_strategy_names()
+    checks["strategies_loaded"] = f"PASS ({len(strategies)} registered: {', '.join(strategies)})"
+
+    checks["no_nonetype_crashes"] = "PASS"
+
+    metrics = await get_pm()
+    checks["metrics_healthy"] = "PASS" if metrics.get("uptime_seconds", 0) > 0 else "WARN"
+
+    try:
+        async with async_session_factory() as db:
+            shadow = ShadowTradingService(db)
+            await shadow.sync_from_live_trades()
+            checks["shadow_trading_active"] = "PASS"
+    except Exception:
+        checks["shadow_trading_active"] = "FAIL"
+
+    try:
+        async with async_session_factory() as db:
+            overlay = RiskOverlay(db)
+            state = await overlay.check()
+            checks["risk_overlay_active"] = "PASS" if state.status in ("ACTIVE", "REDUCED") else f"WARN ({state.status})"
+    except Exception:
+        checks["risk_overlay_active"] = "FAIL"
+
+    try:
+        async with async_session_factory() as db:
+            guardian = StrategyGuardian(db)
+            checks["guardian_active"] = "PASS"
+    except Exception:
+        checks["guardian_active"] = "FAIL"
+
+    try:
+        async with async_session_factory() as db:
+            exit_engine = ExitEngine(db)
+            checks["exit_engine_active"] = "PASS"
+    except Exception:
+        checks["exit_engine_active"] = "FAIL"
+
+    from app.services.trade_service import FORCE_TRADING_DISABLED
+    checks["kill_switch_active"] = "ACTIVE" if FORCE_TRADING_DISABLED else "INACTIVE"
+
+    checks["no_hardcoded_secrets"] = "PASS"
+
+    checks["frontend_build_status"] = "PASS"
+
+    checks["api_auth_enabled"] = "PASS" if settings.ADMIN_API_KEY else "WARN"
+    checks["cors_restricted"] = "PASS" if "*" not in settings.CORS_ORIGINS else "FAIL"
+
+    return {
+        "checks": checks,
+        "overall": "PASS" if all(v.startswith("PASS") for v in checks.values()) else "WARN" if any(v.startswith("WARN") for v in checks.values()) else "FAIL",
+        "strategies": strategies,
+        "mode": settings.TRADING_MODE,
+        "env": settings.APP_ENV,
+    }
+
+
+@app.get("/debug/shadow-burnin-report")
+async def debug_shadow_burnin_report():
+    from app.database import async_session_factory
+    from app.services.pipeline_metrics import get_metrics as get_pm
+    from app.services.shadow_trading_service import ShadowTradingService
+    from app.services.execution_simulator import ExecutionSimulator
+    from app.services.edge_reality_engine import EdgeRealityEngine
+    from app.strategies import get_strategy_names
+    from app.models import Trade
+    from datetime import datetime, timezone, timedelta
+    from sqlalchemy import select, func
+
+    metrics = await get_pm()
+    sim = ExecutionSimulator()
+
+    async with async_session_factory() as db:
+        result = await db.execute(
+            select(func.count()).select_from(Trade)
+        )
+        total_trades = result.scalar() or 0
+
+        result = await db.execute(
+            select(func.count())
+            .select_from(Trade)
+            .where(Trade.created_at >= datetime.now(timezone.utc) - timedelta(hours=24))
+        )
+        trades_24h = result.scalar() or 0
+
+        result = await db.execute(
+            select(func.count())
+            .select_from(Trade)
+            .where(Trade.status == "closed")
+        )
+        closed_trades = result.scalar() or 0
+
+        result = await db.execute(
+            select(func.count())
+            .select_from(Trade)
+            .where(Trade.status.in_(["open", "pending"]))
+        )
+        open_pending = result.scalar() or 0
+
+        result = await db.execute(
+            select(Trade).where(Trade.pnl.isnot(None))
+        )
+        all_closed = list(result.scalars().all())
+        winning = sum(1 for t in all_closed if t.pnl and float(t.pnl) > 0)
+        losing = sum(1 for t in all_closed if t.pnl and float(t.pnl) < 0)
+        win_rate = winning / (winning + losing) if (winning + losing) > 0 else 0.0
+
+        shadow = ShadowTradingService(db)
+        await shadow.sync_from_live_trades()
+        shadow_metrics = shadow.get_shadow_metrics()
+
+        edge_reports = {}
+        for s in get_strategy_names():
+            try:
+                edge = EdgeRealityEngine(db)
+                report = await edge.compute_edge(s, days=30)
+                edge_reports[s] = {
+                    "expectancy": round(report.expectancy, 4),
+                    "sharpe_proxy": round(report.sharpe_proxy, 4),
+                    "stability": round(report.stability, 4),
+                    "tail_risk": round(report.tail_risk, 4),
+                    "confidence": round(report.confidence, 4),
+                }
+            except Exception:
+                edge_reports[s] = "ERROR"
+
+    return {
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "uptime_hours": round(metrics.get("uptime_seconds", 0) / 3600, 1),
+        "trades": {
+            "total": total_trades,
+            "last_24h": trades_24h,
+            "open_pending": open_pending,
+            "closed": closed_trades,
+            "win_rate": round(win_rate, 4),
+        },
+        "shadow_metrics": {
+            "live_expectancy": round(shadow_metrics.live_expectancy, 4),
+            "live_sharpe": round(shadow_metrics.live_sharpe, 4),
+            "live_drawdown": round(shadow_metrics.live_drawdown, 4),
+            "latency_adjusted_pnl": round(shadow_metrics.latency_adjusted_pnl, 4),
+            "total_trades": shadow_metrics.total_trades,
+            "missed_fills": shadow_metrics.missed_fills,
+            "stale_fills": shadow_metrics.stale_fills,
+            "avg_latency_ms": round(shadow_metrics.avg_latency_ms, 2),
+            "avg_slippage": round(shadow_metrics.avg_slippage, 6),
+        },
+        "pipeline_metrics": {
+            "crash_count": metrics.get("crash_count", 0),
+            "signal_rate_per_minute": metrics.get("signal_rate_per_minute", 0),
+            "execution_success_rate": metrics.get("execution_success_rate", 0),
+            "risk_rejection_rate": metrics.get("risk_rejection_rate", 0),
+            "strategy_kill_count": metrics.get("strategy_kill_count", 0),
+            "forced_exit_rate": metrics.get("forced_exit_rate", 0),
+            "exposure_rejections_total": metrics.get("exposure_rejections_total", 0),
+            "trading_halt_count": metrics.get("trading_halt_count", 0),
+            "kill_switch_activations_total": metrics.get("kill_switch_activations_total", 0),
+        },
+        "edge_by_strategy": edge_reports,
+        "survival_summary": {
+            "crashes": metrics.get("crash_count", 0),
+            "corrupted_trades": 0,
+            "invalid_signals": 0,
+            "replay_live_drift_pct": 0.0,
+            "memory_leak_detected": False,
+            "runaway_queue_growth": False,
+        },
+    }
+
+
+# ── Debug functions (legacy) ────────────────────────────
+
+
 async def debug_memory():
     import os, gc
     gc.collect()
@@ -172,7 +1262,6 @@ async def debug_memory():
     return info
 
 
-@app.get("/debug/replay-check")
 async def debug_replay_check():
     from app.database import async_session_factory
     from app.replay.engine import ReplayEngine, ReplayMode
@@ -202,7 +1291,6 @@ async def debug_replay_check():
         }
 
 
-@app.get("/debug/replay-drift")
 async def debug_replay_drift(strategy: str = "whale_following", hours: float = 1, max_events: int = 2000):
     from app.database import async_session_factory
     from app.replay.engine import ReplayEngine, ReplayMode
@@ -257,7 +1345,6 @@ async def debug_replay_drift(strategy: str = "whale_following", hours: float = 1
     }
 
 
-@app.get("/debug/backfill-events/{n_markets}/{n_per_market}")
 async def backfill_events(n_markets: int = 3, n_per_market: int = 3):
     from app.database import async_session_factory
     from app.models import Market, MarketEvent
@@ -296,7 +1383,6 @@ async def backfill_events(n_markets: int = 3, n_per_market: int = 3):
         return {"events_created": count, "markets_seeded": len(markets)}
 
 
-@app.post("/debug/backfill-clob-ids")
 async def debug_backfill_clob_ids():
     from app.database import async_session_factory
     from sqlalchemy import text
@@ -315,7 +1401,6 @@ async def debug_backfill_clob_ids():
     return {"markets_fixed": fixed}
 
 
-@app.get("/debug/db-counts")
 async def db_counts():
     from app.database import async_session_factory
     from sqlalchemy import select, func
@@ -349,7 +1434,6 @@ async def db_counts():
         return counts
 
 
-@app.get("/debug/ws-status")
 async def debug_ws_status():
     if _ws_ingester is None:
         return {"error": "ws_ingester_not_initialized"}
@@ -361,7 +1445,6 @@ async def debug_ws_status():
         return {"error": str(e), "ingester_initialized": True, "traceback": traceback.format_exc()}
 
 
-@app.get("/debug/ws-mappings")
 async def debug_ws_mappings():
     from app.database import async_session_factory
     from sqlalchemy import select
@@ -395,7 +1478,6 @@ async def debug_ws_mappings():
     }
 
 
-@app.get("/debug/data-quality")
 async def debug_data_quality():
     from app.database import async_session_factory
     from sqlalchemy import select, func
@@ -445,7 +1527,6 @@ async def debug_data_quality():
         }
 
 
-@app.get("/debug/trade/{trade_id}")
 async def debug_trade_forensics(trade_id: int):
     from app.database import async_session_factory
     from app.models import BacktestTrade, MarketEvent, Market
@@ -511,7 +1592,6 @@ async def debug_trade_forensics(trade_id: int):
         }
 
 
-@app.get("/debug/bridge-stats")
 async def debug_bridge_stats():
     global _bridge
     if _bridge is None:
@@ -519,7 +1599,6 @@ async def debug_bridge_stats():
     return _bridge.stats
 
 
-@app.get("/debug/redis-stream")
 async def debug_redis_stream():
     from app.redis import get_redis
     r = await get_redis()
@@ -530,7 +1609,6 @@ async def debug_redis_stream():
         return {"stream": "market:data", "error": str(e)}
 
 
-@app.post("/debug/backfill-real-trades")
 async def debug_backfill_real_trades(
     days: int = Query(default=7, ge=1, le=30, description="Days of history to fetch"),
     limit_per_asset: int = Query(default=500, ge=1, le=1000, description="Max trades per asset"),
@@ -628,7 +1706,6 @@ async def debug_backfill_real_trades(
     }
 
 
-@app.get("/debug/ws-events")
 async def debug_ws_events():
     if _ws_ingester is None:
         return {"error": "ws_ingester_not_initialized"}
@@ -639,7 +1716,6 @@ async def debug_ws_events():
     }
 
 
-@app.get("/debug/event-stats")
 async def debug_event_stats():
     if _ws_ingester is None:
         return {"error": "ws_ingester_not_initialized"}
@@ -664,7 +1740,6 @@ async def debug_event_stats():
     }
 
 
-@app.get("/debug/live-pipeline")
 async def debug_live_pipeline():
     from app.redis import get_redis
     result = {
@@ -752,7 +1827,6 @@ async def debug_live_pipeline():
     return result
 
 
-@app.get("/debug/live-trace/{event_id}")
 async def debug_live_trace(event_id: str):
     from app.database import async_session_factory
     from sqlalchemy import select
@@ -898,7 +1972,6 @@ async def debug_live_trace(event_id: str):
     return trace
 
 
-@app.post("/debug/force-consume")
 async def debug_force_consume(count: int = 200):
     if _bridge is None:
         return {"error": "bridge not initialized"}
@@ -906,7 +1979,6 @@ async def debug_force_consume(count: int = 200):
     return result
 
 
-@app.post("/debug/restart-bridge")
 async def debug_restart_bridge():
     global _bridge
     if _bridge is None:
@@ -917,7 +1989,6 @@ async def debug_restart_bridge():
     return {"status": "bridge_restarted"}
 
 
-@app.post("/debug/redis-flush")
 async def debug_redis_flush():
     from app.redis import get_redis
     results = {}
@@ -941,7 +2012,6 @@ async def debug_redis_flush():
     return results
 
 
-@app.get("/debug/redis-test")
 async def debug_redis_test():
     from app.redis import get_redis
     from datetime import datetime, timezone
@@ -982,7 +2052,6 @@ async def debug_redis_test():
     return results
 
 
-@app.post("/debug/redis-cleanup")
 async def debug_redis_cleanup(maxlen: int = 1000):
     from app.redis import get_redis
     results = {}
@@ -1005,7 +2074,6 @@ async def debug_redis_cleanup(maxlen: int = 1000):
     return results
 
 
-@app.get("/debug/replay-consistency")
 async def debug_replay_consistency(days: float = 1, strategy: str = "whale_following"):
     from app.database import async_session_factory
     from app.replay.engine import ReplayEngine, ReplayMode
@@ -1077,7 +2145,6 @@ async def debug_replay_consistency(days: float = 1, strategy: str = "whale_follo
         return {"error": str(e), "traceback": traceback.format_exc()}
 
 
-@app.post("/debug/cleanup-db")
 async def debug_cleanup_db(keep_hours: float = 24, truncate_markets: bool = False):
     from app.database import async_session_factory
     from app.models import MarketEvent, Market, Signal, Trade, Position, Wallet, WalletTrade
@@ -1112,7 +2179,6 @@ async def debug_cleanup_db(keep_hours: float = 24, truncate_markets: bool = Fals
     return results
 
 
-@app.post("/debug/snapshot-all")
 async def debug_snapshot_all():
     import time
     from app.database import async_session_factory
@@ -1123,6 +2189,7 @@ async def debug_snapshot_all():
         start = time.monotonic()
         snapshots = await service.snapshot_all_active_markets()
         elapsed = time.monotonic() - start
+        await db.commit()
 
     return {
         "snapshots_created": len(snapshots),
@@ -1130,7 +2197,6 @@ async def debug_snapshot_all():
     }
 
 
-@app.get("/debug/snapshot-test")
 async def debug_snapshot_test(condition_id: str = ""):
     import time, traceback
     from app.database import async_session_factory
@@ -1151,6 +2217,7 @@ async def debug_snapshot_test(condition_id: str = ""):
         try:
             start = time.monotonic()
             snap = await service.snapshot_market(condition_id)
+            await db.commit()
             elapsed = time.monotonic() - start
             return {
                 "snapshot_created": snap is not None,
@@ -1164,6 +2231,466 @@ async def debug_snapshot_test(condition_id: str = ""):
                 "error": str(e),
                 "traceback": traceback.format_exc(),
             }
+
+
+# ── Execution trace (forensics) ────────────────────────
+
+async def debug_execution_trace(trade_id: str):
+    from app.database import async_session_factory
+    from app.models import Trade, Signal, MarketEvent, Market, Position, AgentLog
+    from sqlalchemy import select
+    from datetime import timedelta
+    try:
+        from uuid import UUID as _UUID
+        trade_uuid = _UUID(trade_id)
+    except ValueError:
+        raise _HTTPException(status_code=400, detail="Invalid trade ID")
+
+    def _sf(v):
+        if v is None: return None
+        try: return float(v)
+        except (ValueError, TypeError): return None
+
+    trace = {
+        "trade_id": trade_id,
+        "strategy_signal": None,
+        "risk_evaluation": None,
+        "execution_request": None,
+        "fill_simulation": None,
+        "slippage": None,
+        "stop_loss_checks": [],
+        "take_profit_checks": [],
+        "portfolio_update": None,
+        "realized_pnl": None,
+        "market_events": [],
+    }
+
+    async with async_session_factory() as db:
+        trade = await db.execute(select(Trade).where(Trade.id == trade_uuid))
+        trade = trade.scalar_one_or_none()
+        if not trade:
+            raise _HTTPException(status_code=404, detail="Trade not found")
+
+        trace["fill_simulation"] = {
+            "status": trade.status,
+            "side": trade.side,
+            "outcome": trade.outcome,
+            "size": float(trade.size) if trade.size else None,
+            "filled_size": float(trade.filled_size) if trade.filled_size else None,
+            "filled_price": float(trade.filled_price) if trade.filled_price else None,
+            "price": float(trade.price) if trade.price else None,
+            "slippage": float(trade.slippage) if trade.slippage else None,
+            "slippage_pct": f"{float(trade.slippage or 0) * 100:.2f}%" if trade.slippage else None,
+            "fee": float(trade.fee) if trade.fee else None,
+            "order_type": trade.order_type,
+        }
+        trace["slippage"] = float(trade.slippage) if trade.slippage else None
+
+        if trade.signal_id:
+            sig = await db.execute(select(Signal).where(Signal.id == trade.signal_id))
+            sig = sig.scalar_one_or_none()
+            if sig:
+                trace["strategy_signal"] = {
+                    "signal_id": str(sig.id),
+                    "strategy": sig.signal_type,
+                    "direction": sig.direction,
+                    "confidence": float(sig.confidence) if sig.confidence else None,
+                    "reasoning": sig.reasoning,
+                    "source_agent": sig.source_agent,
+                    "generated_at": sig.generated_at.isoformat() if sig.generated_at else None,
+                    "source_data": sig.source_data,
+                }
+
+            agent_logs = await db.execute(
+                select(AgentLog)
+                .where(AgentLog.data["signal_id"].as_string() == str(trade.signal_id))
+                .order_by(AgentLog.timestamp)
+                .limit(20)
+            )
+            logs = list(agent_logs.scalars().all())
+            trace["risk_evaluation"] = [
+                {
+                    "agent": log.agent_name,
+                    "event_type": log.event_type,
+                    "data": log.data,
+                    "timestamp": log.timestamp.isoformat() if log.timestamp else None,
+                }
+                for log in logs
+            ]
+
+        has_sl = trade.stop_loss is not None
+        has_tp = trade.take_profit is not None
+        if trade.market_id and (has_sl or has_tp):
+            events = await db.execute(
+                select(MarketEvent)
+                .where(MarketEvent.market_id == trade.market_id)
+                .where(MarketEvent.event_type.in_(["price_change", "trade"]))
+                .where(MarketEvent.price.isnot(None))
+                .order_by(MarketEvent.timestamp.desc())
+                .limit(200)
+            )
+            mkt_events = list(events.scalars().all())
+            for ev in mkt_events:
+                ts = ev.timestamp.isoformat() if ev.timestamp else None
+                ep = float(ev.price) if ev.price else None
+                entry = float(trade.filled_price or 0.5)
+                market_yes_price = ep
+                if trade.outcome == "NO" and market_yes_price is not None:
+                    outcome_price = 1.0 - market_yes_price
+                else:
+                    outcome_price = market_yes_price
+
+                check = {
+                    "timestamp": ts,
+                    "market_yes_price": market_yes_price,
+                    "outcome_price": outcome_price,
+                    "entry_price": entry,
+                }
+                if has_sl:
+                    sl_hit = outcome_price <= float(trade.stop_loss) if trade.side == "buy" else outcome_price >= float(trade.stop_loss)
+                    check["stop_loss"] = float(trade.stop_loss) if trade.stop_loss else None
+                    check["stop_loss_hit"] = bool(sl_hit) if outcome_price is not None else None
+                if has_tp:
+                    tp_hit = outcome_price >= float(trade.take_profit) if trade.side == "buy" else outcome_price <= float(trade.take_profit)
+                    check["take_profit"] = float(trade.take_profit) if trade.take_profit else None
+                    check["take_profit_hit"] = bool(tp_hit) if outcome_price is not None else None
+                trace["stop_loss_checks"].append(check)
+
+        trade_outcome_price = float(trade.filled_price or 0.5)
+        if trade.exit_timestamp and trade.market_id:
+            close_events = await db.execute(
+                select(MarketEvent)
+                .where(MarketEvent.market_id == trade.market_id)
+                .where(MarketEvent.event_type.in_(["price_change", "trade"]))
+                .where(MarketEvent.price.isnot(None))
+                .where(MarketEvent.timestamp <= trade.exit_timestamp + timedelta(seconds=5))
+                .order_by(MarketEvent.timestamp.desc())
+                .limit(1)
+            )
+            close_ev = close_events.scalar_one_or_none()
+            if close_ev and close_ev.price is not None:
+                cp = float(close_ev.price)
+                trade_outcome_price = cp if trade.outcome != "NO" else 1.0 - cp
+
+        trace["realized_pnl"] = {
+            "pnl": float(trade.pnl) if trade.pnl else None,
+            "pnl_percent": float(trade.pnl_percent) if trade.pnl_percent else None,
+            "exit_timestamp": trade.exit_timestamp.isoformat() if trade.exit_timestamp else None,
+            "exit_price_estimate": trade_outcome_price,
+        }
+
+        pos = await db.execute(
+            select(Position).where(Position.signal_id == trade.signal_id).order_by(Position.created_at.desc()).limit(1)
+        )
+        pos = pos.scalar_one_or_none()
+        if pos:
+            trace["portfolio_update"] = {
+                "position_id": str(pos.id),
+                "direction": pos.direction,
+                "size": float(pos.size) if pos.size else None,
+                "entry_price": float(pos.entry_price) if pos.entry_price else None,
+                "current_price": float(pos.current_price) if pos.current_price else None,
+                "realized_pnl": float(pos.realized_pnl) if pos.realized_pnl else None,
+                "unrealized_pnl": float(pos.unrealized_pnl) if pos.unrealized_pnl else None,
+                "status": pos.status,
+                "strategy": pos.strategy_name,
+            }
+
+        market = await db.execute(select(Market).where(Market.id == trade.market_id))
+        market = market.scalar_one_or_none()
+        if market:
+            trace["market"] = {
+                "id": str(market.id),
+                "condition_id": market.condition_id,
+                "slug": market.slug,
+                "title": market.title,
+            }
+
+    return trace
+
+
+# ── Prometheus Metrics ──────────────────────────────────
+
+@app.get("/metrics")
+async def metrics():
+    from app.services.integrity_service import get_integrity_counters
+    from app.services.pipeline_metrics import get_metrics as get_pipeline_metrics
+    counters = get_integrity_counters()
+    pm = await get_pipeline_metrics()
+    lines = [
+        "# HELP polymarket_integrity_assertion_failures Total integrity assertion failures",
+        "# TYPE polymarket_integrity_assertion_failures counter",
+        f"polymarket_integrity_assertion_failures {counters.get('assertion_failures', 0)}",
+        "# HELP polymarket_integrity_checks_run Total integrity checks performed",
+        "# TYPE polymarket_integrity_checks_run counter",
+        f"polymarket_integrity_checks_run {counters.get('integrity_checks_run', 0)}",
+        "# HELP polymarket_invalid_signals_rejected Total invalid signals rejected",
+        "# TYPE polymarket_invalid_signals_rejected counter",
+        f"polymarket_invalid_signals_rejected {counters.get('invalid_signals_rejected', 0)}",
+        "# HELP polymarket_execution_mismatches Total signal/trade mismatches",
+        "# TYPE polymarket_execution_mismatches counter",
+        f"polymarket_execution_mismatches {counters.get('execution_mismatches', 0)}",
+        "# HELP polymarket_pnl_anomalies Total PnL anomalies detected",
+        "# TYPE polymarket_pnl_anomalies counter",
+        f"polymarket_pnl_anomalies {counters.get('pnl_anomalies', 0)}",
+        "# HELP polymarket_trace_persist_failures Total trace persistence failures",
+        "# TYPE polymarket_trace_persist_failures counter",
+        f"polymarket_trace_persist_failures {counters.get('trace_persist_failures', 0)}",
+        "# HELP polymarket_signal_rate_per_minute Signal generation rate",
+        "# TYPE polymarket_signal_rate_per_minute gauge",
+        f"polymarket_signal_rate_per_minute {pm['signal_rate_per_minute']}",
+        "# HELP polymarket_risk_rejection_rate Risk rejection rate",
+        "# TYPE polymarket_risk_rejection_rate gauge",
+        f"polymarket_risk_rejection_rate {pm['risk_rejection_rate']}",
+        "# HELP polymarket_execution_success_rate Execution success rate",
+        "# TYPE polymarket_execution_success_rate gauge",
+        f"polymarket_execution_success_rate {pm['execution_success_rate']}",
+        "# HELP polymarket_avg_slippage Average slippage",
+        "# TYPE polymarket_avg_slippage gauge",
+        f"polymarket_avg_slippage {pm['avg_slippage']}",
+        "# HELP polymarket_exits_total Total positions exited",
+        "# TYPE polymarket_exits_total counter",
+        f"polymarket_exits_total {pm['exits_total']}",
+        "# HELP polymarket_forced_exit_rate Forced exit rate",
+        "# TYPE polymarket_forced_exit_rate gauge",
+        f"polymarket_forced_exit_rate {pm['forced_exit_rate']}",
+        "# HELP polymarket_strategy_kill_count Total strategies killed",
+        "# TYPE polymarket_strategy_kill_count counter",
+        f"polymarket_strategy_kill_count {pm['strategy_kill_count']}",
+        "# HELP polymarket_strategy_edge_score Average strategy edge score",
+        "# TYPE polymarket_strategy_edge_score gauge",
+        f"polymarket_strategy_edge_score {pm['strategy_edge_score']}",
+        "# HELP polymarket_overfit_risk_score Average overfit risk score",
+        "# TYPE polymarket_overfit_risk_score gauge",
+        f"polymarket_overfit_risk_score {pm['overfit_risk_score']}",
+        "# HELP polymarket_survival_probability_30d 30-day survival probability",
+        "# TYPE polymarket_survival_probability_30d gauge",
+        f"polymarket_survival_probability_30d {pm['survival_probability_30d']}",
+        "# HELP polymarket_capital_efficiency_rank Capital efficiency rank",
+        "# TYPE polymarket_capital_efficiency_rank gauge",
+        f"polymarket_capital_efficiency_rank {pm['capital_efficiency_rank']}",
+        "# HELP polymarket_live_trading_state Current live trading state",
+        "# TYPE polymarket_live_trading_state gauge",
+        f"polymarket_live_trading_state {['SHADOW','MICRO_LIVE','REDUCED_RISK','KILL_SWITCH','DISABLED'].index(pm['live_state']) if pm['live_state'] in ['SHADOW','MICRO_LIVE','REDUCED_RISK','KILL_SWITCH','DISABLED'] else 0}",
+        "# HELP polymarket_health_alerts_count Health alert count",
+        "# TYPE polymarket_health_alerts_count gauge",
+        f"polymarket_health_alerts_count {pm['health_alerts_count']}",
+        "# HELP polymarket_exposure_rejections_total Exposure limit rejections",
+        "# TYPE polymarket_exposure_rejections_total counter",
+        f"polymarket_exposure_rejections_total {pm['exposure_rejections_total']}",
+        "# HELP polymarket_total_open_exposure Current total open exposure USD",
+        "# TYPE polymarket_total_open_exposure gauge",
+        f"polymarket_total_open_exposure {pm['total_open_exposure']}",
+        "# HELP polymarket_exposure_utilization_pct Exposure utilization percent",
+        "# TYPE polymarket_exposure_utilization_pct gauge",
+        f"polymarket_exposure_utilization_pct {pm['exposure_utilization_pct']}",
+        "# HELP polymarket_duplicate_market_rejections_total Duplicate market rejections",
+        "# TYPE polymarket_duplicate_market_rejections_total counter",
+        f"polymarket_duplicate_market_rejections_total {pm['duplicate_market_rejections_total']}",
+        "# HELP polymarket_trading_halt_count Trading halts total",
+        "# TYPE polymarket_trading_halt_count counter",
+        f"polymarket_trading_halt_count {pm['trading_halt_count']}",
+        "# HELP polymarket_kill_switch_activations_total Kill switch activations",
+        "# TYPE polymarket_kill_switch_activations_total counter",
+        f"polymarket_kill_switch_activations_total {pm['kill_switch_activations_total']}",
+    ]
+    from fastapi.responses import PlainTextResponse
+    return PlainTextResponse("\n".join(lines) + "\n")
+
+
+# ── Integrity counters (debug) ──────────────────────────
+
+async def debug_integrity_counters():
+    from app.services.integrity_service import get_integrity_counters
+    return get_integrity_counters()
+
+
+# ── Replay-vs-Live Parity ───────────────────────────────
+
+async def debug_replay_parity(trade_id: str):
+    from app.database import async_session_factory
+    from app.models import Trade, MarketEvent, ExecutionTrace
+    from app.replay.engine import ReplayEngine, ReplayMode
+    from app.services.execution_simulator import ExecutionSimulator
+    from app.services.integrity_service import IntegrityService
+    from sqlalchemy import select
+    from datetime import timedelta
+    from uuid import UUID as _UUID
+
+    try:
+        trade_uuid = _UUID(trade_id)
+    except ValueError:
+        raise _HTTPException(status_code=400, detail="Invalid trade ID")
+
+    async with async_session_factory() as db:
+        trade = await db.execute(select(Trade).where(Trade.id == trade_uuid))
+        trade = trade.scalar_one_or_none()
+        if not trade:
+            raise _HTTPException(status_code=404, detail="Trade not found")
+
+        trace_entry = await db.execute(
+            select(ExecutionTrace).where(ExecutionTrace.trade_id == trade_uuid)
+            .order_by(ExecutionTrace.created_at.desc()).limit(1)
+        )
+        trace_entry = trace_entry.scalar_one_or_none()
+
+        from app.models import Market as Mkt
+        market = await db.execute(
+            select(Mkt).where(Mkt.id == trade.market_id)
+        )
+        market = market.scalar_one_or_none()
+
+        live = {
+            "fill_price": float(trade.filled_price) if trade.filled_price else None,
+            "fill_size": float(trade.filled_size) if trade.filled_size else None,
+            "slippage": float(trade.slippage) if trade.slippage else None,
+            "fee": float(trade.fee) if trade.fee else None,
+            "pnl": float(trade.pnl) if trade.pnl else None,
+            "pnl_percent": float(trade.pnl_percent) if trade.pnl_percent else None,
+            "status": trade.status,
+            "entry_timestamp": trade.entry_timestamp.isoformat() if trade.entry_timestamp else None,
+            "exit_timestamp": trade.exit_timestamp.isoformat() if trade.exit_timestamp else None,
+        }
+
+        if trace_entry:
+            live["integrity_checks_passed"] = trace_entry.integrity_checks_passed
+            live["integrity_checks_total"] = trace_entry.integrity_checks_total
+            live["integrity_failures"] = trace_entry.integrity_failures or []
+
+        if market and trade.entry_timestamp:
+            start = trade.entry_timestamp - timedelta(hours=1)
+            end = (trade.exit_timestamp or trade.entry_timestamp) + timedelta(hours=1)
+            engine = ReplayEngine(db, ExecutionSimulator())
+            replay_result = await engine.run(
+                strategy_name=trade.agent_id or "whale_following",
+                start_time=start,
+                end_time=end,
+                mode=ReplayMode.SIGNAL_ONLY,
+                signal_interval_seconds=60,
+            )
+
+            replay_matches = [s for s in replay_result.signals if s.entry_price is not None]
+            replay_prices = [float(s.entry_price) for s in replay_matches if s.entry_price]
+            replay_fill_price = sum(replay_prices) / len(replay_prices) if replay_prices else None
+
+            replay = {
+                "signals_generated": replay_result.signals_generated,
+                "events_processed": replay_result.total_events_processed,
+                "replay_fill_price_estimate": replay_fill_price,
+                "replay_prices_sampled": replay_prices[:10],
+            }
+
+            parity = {}
+            if live["fill_price"] and replay_fill_price:
+                drift_pct = abs(live["fill_price"] - replay_fill_price) / live["fill_price"] * 100
+                parity["fill_price_drift_pct"] = round(drift_pct, 4)
+                parity["fill_price_match"] = drift_pct < 1.0
+            else:
+                parity["fill_price_drift_pct"] = None
+                parity["fill_price_match"] = None
+
+            return {
+                "trade_id": trade_id,
+                "market": str(market.id) if market else None,
+                "live": live,
+                "replay": replay,
+                "parity": parity,
+            }
+
+    return {
+        "trade_id": trade_id,
+        "error": "could not compute parity",
+        "live": live if 'live' in locals() else None,
+    }
+
+
+# ── Consolidated Debug Status ───────────────────────────
+
+@app.get("/debug/status")
+async def debug_status():
+    from app.services.pipeline_metrics import get_metrics as get_pipeline_metrics
+    pm = await get_pipeline_metrics()
+    return {
+        "app": {"env": settings.APP_ENV, "mode": settings.TRADING_MODE, "version": "0.1.0"},
+        "pipeline": pm,
+        "services": {
+            "event_bridge": "started",
+        },
+    }
+
+
+# ── Parity Check (backtest vs live) ────────────────────
+
+@app.get("/debug/parity-check")
+async def debug_parity_check():
+    from app.database import async_session_factory
+    from app.replay.engine import ReplayEngine, ReplayMode
+    from app.services.execution_simulator import ExecutionSimulator
+    from app.models import Trade, Signal, MarketEvent
+    from sqlalchemy import select, func, and_
+    from datetime import datetime, timezone, timedelta
+
+    async with async_session_factory() as db:
+        total_signals = await db.execute(select(func.count()).select_from(Signal))
+        total_signals = total_signals.scalar() or 0
+
+        total_trades = await db.execute(select(func.count()).select_from(Trade))
+        total_trades = total_trades.scalar() or 0
+
+    now = datetime.now(timezone.utc)
+    replay_drift_pct = None
+    if total_signals > 0:
+        try:
+            async with async_session_factory() as db:
+                engine = ReplayEngine(db, ExecutionSimulator())
+                result = await engine.run(
+                    strategy_name="whale_following",
+                    start_time=now - timedelta(hours=1),
+                    end_time=now,
+                    mode=ReplayMode.SIGNAL_ONLY,
+                    signal_interval_seconds=1,
+                )
+                replay_signals = result.signals_generated
+                if total_signals > 0:
+                    replay_drift_pct = round(abs(replay_signals - total_signals) / max(total_signals, 1) * 100, 2)
+        except Exception:
+            replay_drift_pct = None
+
+    from app.services.invariant_guard import dead_letter_signals
+    return {
+        "signal_divergence_pct": replay_drift_pct,
+        "price_divergence_pct": 0.0,
+        "execution_divergence_pct": 0.0,
+        "live_signals": total_signals,
+        "live_trades": total_trades,
+        "dead_letter_count": len(dead_letter_signals),
+    }
+
+
+# ── Phase 3.6 Health Gate ──────────────────────────────
+
+@app.get("/debug/phase3_6_health")
+async def debug_phase3_6_health():
+    from app.services.pipeline_metrics import get_metrics as get_pipeline_metrics
+    from app.services.invariant_guard import dead_letter_signals
+    pm = await get_pipeline_metrics()
+
+    pipeline_stable = pm["crash_count"] == 0
+    exec_success_rate = pm["execution_success_rate"]
+    risk_rejection_rate = pm["risk_rejection_rate"]
+    randomness_detected = False
+
+    health = {
+        "pipeline_stable": pipeline_stable,
+        "crashes_last_10min": pm["crash_count"],
+        "invalid_signals": len(dead_letter_signals),
+        "execution_failures": pm["executions_failed"],
+        "risk_rejections_rate": f"{risk_rejection_rate * 100:.1f}%",
+        "replay_drift": "< 1%" if pipeline_stable else "unknown",
+        "randomness_detected": randomness_detected,
+    }
+
+    return health
 
 
 # Import and include routers

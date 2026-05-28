@@ -6,6 +6,7 @@ from app.strategies.liquidity_vacuum import LiquidityVacuumStrategy
 from app.strategies.spread_compression import SpreadCompressionStrategy
 from app.strategies.coordinated_wallets import CoordinatedWalletsStrategy
 from app.strategies.momentum_spike import MomentumSpikeStrategy
+from app.strategies.momentum_reversion import MomentumReversionStrategy
 from app.strategies.news_repricing import NewsRepricingStrategy
 from app.strategies.ensemble import EnsembleStrategy
 
@@ -40,6 +41,7 @@ for cls in [
     SpreadCompressionStrategy,
     CoordinatedWalletsStrategy,
     MomentumSpikeStrategy,
+    MomentumReversionStrategy,
     NewsRepricingStrategy,
     EnsembleStrategy,
 ]:
@@ -56,6 +58,7 @@ __all__ = [
     "SpreadCompressionStrategy",
     "CoordinatedWalletsStrategy",
     "MomentumSpikeStrategy",
+    "MomentumReversionStrategy",
     "NewsRepricingStrategy",
     "EnsembleStrategy",
     "register_strategy",

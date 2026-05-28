@@ -1,4 +1,3 @@
-import random
 import uuid
 from datetime import datetime, timezone
 from typing import Any
@@ -17,9 +16,35 @@ class PaperEngine:
         self.capital = settings.PAPER_INITIAL_CAPITAL
         self.positions: dict[uuid.UUID, dict] = {}
 
+    async def _get_latest_market_price(self, market_id: uuid.UUID) -> float | None:
+        result = await self.db.execute(
+            select(MarketEvent)
+            .where(MarketEvent.market_id == market_id)
+            .where(MarketEvent.event_type.in_(["price_change", "trade"]))
+            .where(MarketEvent.price.isnot(None))
+            .order_by(MarketEvent.timestamp.desc())
+            .limit(1)
+        )
+        event = result.scalar_one_or_none()
+        if event and event.price is not None:
+            return float(event.price)
+        return None
+
+    def _outcome_price(self, market_yes_price: float, outcome: str | None) -> float:
+        if outcome == "NO":
+            return 1.0 - market_yes_price
+        return market_yes_price
+
     async def execute_market_order(self, trade: Trade) -> dict[str, Any]:
-        slippage = random.uniform(0.001, 0.005)
-        fill_price = (trade.price or 0.5) * (1 + slippage) if trade.side == "buy" else (trade.price or 0.5) * (1 - slippage)
+        market_price = None
+        if trade.market_id:
+            market_price = await self._get_latest_market_price(trade.market_id)
+
+        base_price = market_price if market_price is not None else (trade.price or 0.5)
+        base_price = self._outcome_price(base_price, trade.outcome)
+
+        slippage = 0.001
+        fill_price = base_price * (1 + slippage) if trade.side == "buy" else base_price * (1 - slippage)
         fee = trade.size * 0.001
         filled_size = trade.size
 
@@ -30,27 +55,24 @@ class PaperEngine:
         trade.fee = fee
         trade.entry_timestamp = datetime.now(timezone.utc)
 
-        if not trade.stop_loss:
-            trade.stop_loss = fill_price * (1 - settings.STOP_LOSS_PERCENT / 100)
-        if not trade.take_profit:
-            trade.take_profit = fill_price * (1 + settings.TAKE_PROFIT_PERCENT / 100)
-
         self.positions[trade.id] = {
             "entry_price": fill_price,
             "size": filled_size,
             "side": trade.side,
-            "stop_loss": trade.stop_loss,
-            "take_profit": trade.take_profit,
+            "outcome": trade.outcome,
+            "market_id": trade.market_id,
         }
 
         logger.info(
             "paper_order_filled",
             trade_id=str(trade.id),
             side=trade.side,
+            outcome=trade.outcome,
             size=filled_size,
             price=fill_price,
             slippage=slippage,
             fee=fee,
+            market_price=market_price,
         )
 
         await self.db.flush()
@@ -63,15 +85,15 @@ class PaperEngine:
             "fee": fee,
         }
 
-    async def close_position(self, trade: Trade) -> dict[str, Any]:
-        position = self.positions.get(trade.id)
-        if not position:
-            current_price = trade.filled_price or 0.5
-            exit_price = current_price * (0.98 if trade.side == "buy" else 1.02)
-        else:
-            entry = position["entry_price"]
-            direction = 1 if position["side"] == "buy" else -1
-            exit_price = entry * (0.98 if trade.side == "buy" else 1.02)
+    async def close_position(self, trade: Trade, exit_price: float | None = None) -> dict[str, Any]:
+        if exit_price is None:
+            if trade.market_id:
+                market_price = await self._get_latest_market_price(trade.market_id)
+                if market_price is not None:
+                    exit_price = self._outcome_price(market_price, trade.outcome)
+
+        if exit_price is None:
+            exit_price = trade.filled_price or 0.5
 
         if trade.side == "buy":
             pnl = (exit_price - (trade.filled_price or 0.5)) * trade.filled_size
@@ -90,8 +112,11 @@ class PaperEngine:
         logger.info(
             "paper_position_closed",
             trade_id=str(trade.id),
+            side=trade.side,
+            outcome=trade.outcome,
             pnl=pnl,
             pnl_percent=pnl_percent,
+            exit_price=exit_price,
         )
 
         await self.db.flush()
@@ -103,25 +128,4 @@ class PaperEngine:
             "exit_price": exit_price,
         }
 
-    async def check_stop_loss_take_profit(self) -> list[uuid.UUID]:
-        closed = []
-        for trade_id, position in list(self.positions.items()):
-            current_price = position["entry_price"] * random.uniform(0.95, 1.05)
-            if position["side"] == "buy":
-                if current_price <= position["stop_loss"]:
-                    trade = await self.db.execute(
-                        select(Trade).where(Trade.id == trade_id)
-                    )
-                    trade = trade.scalar_one_or_none()
-                    if trade:
-                        await self.close_position(trade)
-                        closed.append(trade_id)
-                elif current_price >= position["take_profit"]:
-                    trade = await self.db.execute(
-                        select(Trade).where(Trade.id == trade_id)
-                    )
-                    trade = trade.scalar_one_or_none()
-                    if trade:
-                        await self.close_position(trade)
-                        closed.append(trade_id)
-        return closed
+

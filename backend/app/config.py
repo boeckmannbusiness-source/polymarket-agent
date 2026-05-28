@@ -85,14 +85,34 @@ class Settings(BaseSettings):
     EXPOSURE_LIMIT: float = 0.3
     COOLDOWN_MINUTES: int = 15
     MIN_CONFIDENCE_THRESHOLD: float = 0.6
-    STOP_LOSS_PERCENT: float = 15.0
-    TAKE_PROFIT_PERCENT: float = 50.0
-
     # Monitoring
     LOG_LEVEL: str = "WARNING"
     LOG_FORMAT: Literal["json", "text"] = "json"
+    # Admin
+    ADMIN_API_KEY: str = ""
+
     METRICS_ENABLED: bool = True
     HEARTBEAT_INTERVAL_SECONDS: int = 30
+
+    # Kill switch
+    FORCE_TRADING_DISABLED: bool = False
+    CLOSE_ALL_POSITIONS_ON_KILL: bool = False
+
+    # Micro-live safety
+    MICRO_LIVE_SAFE_MODE: bool = False
+    MICRO_LIVE_MAX_POSITION_SIZE: float = 1.0
+    MICRO_LIVE_MAX_DAILY_LOSS: float = 2.0
+    MICRO_LIVE_MAX_CONCURRENT: int = 2
+
+    # WS stability
+    WS_STALL_SECONDS: int = 60
+    WS_RECONNECT_STORM_THRESHOLD: int = 5
+    WS_RECONNECT_WINDOW_MINUTES: int = 10
+
+    # Runtime health
+    MEMORY_WARN_MB: int = 500
+    EVENT_LOOP_STALL_SECONDS: float = 2.0
+    TASK_WATCHDOG_INTERVAL: int = 60
 
 
 settings = Settings()

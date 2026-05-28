@@ -68,18 +68,17 @@ class EnsembleStrategy(BaseStrategy):
         for w, s in weighted_signals:
             tally[s.signal] = tally.get(s.signal, 0) + w
         consensus_signal = max(tally, key=tally.get)
-        consensus_confidence = tally[consensus_signal] / total_weight
 
         all_reasons = [s.reason for _, s in weighted_signals]
 
         return StructuredSignal(
             strategy=self.name,
             signal=consensus_signal,
-            confidence=round(consensus_confidence, 4),
-            market_id=market_state.get("market_id") or market_state.get("market_condition_id"),
-            market_condition_id=market_state.get("condition_id") or market_state.get("market_condition_id"),
+            confidence=round(avg_confidence, 4),
+            market_id=market_state.get("market_id"),
+            market_condition_id=market_state.get("condition_id"),
             reason=f"Ensemble({regime}): {'; '.join(all_reasons[:3])}",
-            risk_score=round(1.0 - consensus_confidence, 4),
+            risk_score=round(1.0 - avg_confidence, 4),
             time_horizon="medium",
             market_regime=regime,
             strategy_version=self.version,

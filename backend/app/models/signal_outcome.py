@@ -52,5 +52,7 @@ class SignalOutcome(Base):
     unrealized_pnl: Mapped[float | None] = mapped_column(Numeric(24, 8), nullable=True)
 
     holding_time_seconds: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    evaluation_epoch: Mapped[str] = mapped_column(String(32), default="legacy")
+    signal_direction: Mapped[str | None] = mapped_column(String(16), nullable=True)
 
     calculated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

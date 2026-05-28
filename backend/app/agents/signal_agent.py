@@ -4,7 +4,6 @@ from app.agents.base import BaseAgent
 from app.core.events import EventBus
 from app.core.logging import logger
 from app.database import async_session_factory
-from app.llm import get_llm_provider
 from app.services.market_enrichment_service import MarketEnrichmentService
 from app.services.signal_service import SignalService
 from app.services.strategy_service import StrategyService
@@ -14,13 +13,9 @@ from app.strategies import get_strategy, get_strategy_names
 class SignalAgent(BaseAgent):
     name = "signal_agent"
 
-    def __init__(self):
-        super().__init__()
-        self.llm = get_llm_provider()
-
     async def setup(self):
         names = get_strategy_names()
-        logger.info("signal_agent_setup", strategies=names, llm_provider=self.llm.provider_name)
+        logger.info("signal_agent_setup", strategies=names)
 
     async def loop(self):
         while self.running:
@@ -53,32 +48,34 @@ class SignalAgent(BaseAgent):
                                 if signal is None:
                                     continue
 
-                                created = await signal_service.create_signal(
-                                    market_id=signal.market_id,
-                                    signal_type=strategy_name,
-                                    direction="bullish" if signal.signal == "BUY_YES" else "bearish" if signal.signal == "BUY_NO" else "neutral",
-                                    confidence=signal.confidence,
-                                    reasoning=signal.reason,
-                                    source_agent=f"{strategy_name}:{signal.strategy_version}",
-                                    source_data={
-                                        "risk_score": signal.risk_score,
-                                        "time_horizon": signal.time_horizon,
-                                        "market_regime": signal.market_regime,
-                                        "strategy_version": signal.strategy_version,
-                                        "feature_values": signal.feature_values,
-                                    },
-                                    ttl_minutes=60,
-                                )
+                                side = data.get("side", "buy")
+                                outcome = data.get("outcome", "YES")
+                                size = float(data.get("size", data.get("value", 100)) or 100)
+
+                                event_payload = {
+                                    "signal_id": str(created.id),
+                                    "strategy": strategy_name,
+                                    "confidence": signal.confidence,
+                                    "market_id": signal.market_id or data.get("condition_id"),
+                                    "market_condition_id": signal.market_condition_id or data.get("condition_id"),
+                                    "side": side,
+                                    "outcome": outcome,
+                                    "size": size,
+                                }
+
+                                from app.services.invariant_guard import validate_signal_fields, dead_letter_signals
+                                errors = validate_signal_fields(event_payload)
+                                if errors:
+                                    dead_letter_signals.append({"data": event_payload, "errors": errors, "stage": "signal_agent_reject"})
+                                    logger.warning("signal_skip_invalid_output", errors=errors, strategy=strategy_name)
+                                    continue
 
                                 await EventBus.publish(
                                     "signal:generated",
                                     "signal.generated",
                                     self.name,
                                     {
-                                        "signal_id": str(created.id),
-                                        "strategy": strategy_name,
-                                        "signal": signal.signal,
-                                        "confidence": signal.confidence,
+                                        **event_payload,
                                         "reasoning": signal.reason[:200],
                                         "risk_score": signal.risk_score,
                                     },

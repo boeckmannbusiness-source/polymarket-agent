@@ -7,9 +7,15 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import settings
 from app.models import Trade, Market
 from app.schemas.trade import TradeCreateRequest
+from app.core.logging import logger
 from app.services.risk_service import RiskService
 from app.engines.paper_engine import PaperEngine
+from app.services.integrity_service import IntegrityService
 from app.core.exceptions import TradeExecutionError, MarketNotFoundError
+
+
+FORCE_TRADING_DISABLED = bool(settings.FORCE_TRADING_DISABLED)
+MICRO_LIVE_SAFE_MODE = bool(settings.MICRO_LIVE_SAFE_MODE)
 
 
 class TradeService:
@@ -18,6 +24,7 @@ class TradeService:
         self.risk_service = RiskService(db)
         self.paper_engine = PaperEngine(db)
         self._emergency_stop = False
+        self.integrity = IntegrityService(db)
 
     async def list_trades(
         self,
@@ -46,9 +53,42 @@ class TradeService:
         if self._emergency_stop:
             raise TradeExecutionError("Emergency stop is active. No trades allowed.")
 
+        if FORCE_TRADING_DISABLED:
+            raise TradeExecutionError("Trading disabled by operator kill switch.")
+
         market = await self.db.execute(select(Market).where(Market.id == request.market_id))
         if not market.scalar_one_or_none():
             raise MarketNotFoundError(f"Market {request.market_id} not found")
+
+        existing = await self.db.execute(
+            select(Trade).where(
+                Trade.market_id == request.market_id,
+                Trade.outcome == request.outcome,
+                Trade.status.in_(["open", "pending"]),
+            )
+        )
+        if existing.scalar_one_or_none():
+            from app.services.pipeline_metrics import inc_duplicate_market_rejection
+            await inc_duplicate_market_rejection()
+            raise TradeExecutionError(
+                f"Duplicate position rejected: market {request.market_id} already has open position on {request.outcome}"
+            )
+
+        from app.services.global_risk_guard import GlobalRiskGuard
+        guard = GlobalRiskGuard(self.db)
+        exposure_check = await guard.check_exposure(
+            market_id=str(request.market_id),
+            outcome=request.outcome,
+            proposed_size=float(request.size),
+            proposed_price=float(request.price or 0),
+        )
+        if not exposure_check.approved:
+            raise TradeExecutionError(f"Exposure limit: {exposure_check.reason}")
+
+        if MICRO_LIVE_SAFE_MODE:
+            violation = await self._check_micro_live_restrictions(request)
+            if violation:
+                raise TradeExecutionError(f"Micro-live safety mode: {violation}")
 
         risk_check = await self.risk_service.validate_trade(
             market_id=request.market_id,
@@ -61,6 +101,20 @@ class TradeService:
         if not risk_check.approved:
             raise TradeExecutionError(f"Risk check failed: {risk_check.reason}")
 
+        from app.services.portfolio_allocator import PortfolioAllocator
+        allocator = PortfolioAllocator(self.db)
+        allocation = await allocator.allocate(
+            signal_confidence=1.0,
+            strategy_name=request.agent_id or "unknown",
+            market_archetype="medium_liquidity",
+            regime="normal",
+            current_drawdown=0.0,
+        )
+        adjusted_size = min(request.size, allocation.size)
+
+        if MICRO_LIVE_SAFE_MODE and adjusted_size > 1:
+            adjusted_size = 1.0
+
         trade = Trade(
             id=uuid.uuid4(),
             market_id=request.market_id,
@@ -70,10 +124,8 @@ class TradeService:
             side=request.side,
             outcome=request.outcome,
             order_type=request.order_type,
-            size=request.size,
+            size=adjusted_size,
             price=request.price,
-            stop_loss=request.stop_loss,
-            take_profit=request.take_profit,
             reason=request.reason,
             agent_id=request.agent_id,
         )
@@ -90,14 +142,40 @@ class TradeService:
             trade.entry_timestamp = datetime.now(timezone.utc)
 
         await self.db.flush()
+
+        _, integrity_failures = await self.integrity.verify_and_trace(trade)
+        if integrity_failures:
+            logger.warning("integrity_failures_on_create",
+                        trade_id=str(trade.id),
+                        count=len(integrity_failures),
+                        failures=integrity_failures)
+
         return trade
 
-    async def close_trade(self, trade_id: uuid.UUID) -> Trade:
+    async def _check_micro_live_restrictions(self, request: TradeCreateRequest) -> str | None:
+        restricted_archetypes = {"generic", "politics", "sports"}
+        if request.agent_id and request.agent_id not in ("crisis_reversion",):
+            return f"only crisis_reversion allowed in micro-live mode, got {request.agent_id}"
+        if request.price is not None and float(request.price) >= 0.20:
+            return f"price {request.price} exceeds micro-live max of 0.20"
+
+        from app.services.pipeline_metrics import get_metrics
+        metrics = await get_metrics()
+        daily_pnl = metrics.get("live_daily_pnl", 0.0)
+        if daily_pnl <= -2.0:
+            return f"daily loss limit of $2 reached ({daily_pnl:.2f})"
+        open_trades = metrics.get("live_consecutive_losses", 0)
+        if open_trades >= 2:
+            return f"max concurrent positions (2) would be exceeded"
+
+        return None
+
+    async def close_trade(self, trade_id: uuid.UUID, exit_price: float | None = None) -> Trade:
         trade = await self.get_trade(trade_id)
         if trade.status not in ("open", "pending"):
             raise TradeExecutionError(f"Trade {trade_id} is {trade.status}, cannot close")
 
-        result = await self.paper_engine.close_position(trade)
+        result = await self.paper_engine.close_position(trade, exit_price=exit_price)
         trade.status = result["status"]
         trade.pnl = result["pnl"]
         trade.pnl_percent = result["pnl_percent"]

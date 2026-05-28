@@ -45,6 +45,7 @@ class MarketEvent(Base):
     maker_address: Mapped[str | None] = mapped_column(String(64), nullable=True)
     taker_address: Mapped[str | None] = mapped_column(String(64), nullable=True)
     outcome: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    side: Mapped[str | None] = mapped_column(String(16), nullable=True)
     size: Mapped[float | None] = mapped_column(Numeric(24, 8), nullable=True)
     price: Mapped[float | None] = mapped_column(Numeric(24, 8), nullable=True)
     fee: Mapped[float | None] = mapped_column(Numeric(24, 8), nullable=True)

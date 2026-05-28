@@ -1,5 +1,6 @@
+import math
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 from decimal import Decimal
 from typing import Any
 
@@ -45,6 +46,10 @@ class MarketContext:
     bid_depth: float = 0.0
     ask_depth: float = 0.0
     orderbook_imbalance: float = 0.0
+
+    end_date: datetime | None = None
+    created_at: datetime | None = None
+    slug: str | None = None
 
     whale_buy_volume_1h: float = 0.0
     whale_sell_volume_1h: float = 0.0
@@ -191,11 +196,96 @@ class MarketContext:
             return "mean_reverting"
         return "normal"
 
+    @staticmethod
+    def classify_archetype(slug: str | None, title: str | None) -> str:
+        text = (slug or "") + " " + (title or "")
+        text_lower = text.lower()
+        sports_keywords = ["nba", "mlb", "nfl", "nhl", "wta", "atp", "itf", "mls", "ufc",
+                           "esports", "handicap", "spread", "over/under", "match", "set",
+                           "game", "furia", "fnc", "bbl", "cavaliers", "knicks", "padres",
+                           "twins", "white sox", "sakellaridis", "overbeck", "udvardy",
+                           "golubic", "ostapenko", "seidel", "dc united", "mls cup",
+                           "soccer", "basketball", "tennis", "baseball", "football"]
+        crypto_keywords = ["btc", "bitcoin", "eth", "ethereum", "sol", "solana", "crypto",
+                           "token", "hood", "robinhood", "price", "$"]
+        politics_keywords = ["trump", "election", "ballot", "president", "political",
+                             "castex", "french", "diplomatic", "russia", "ukraine",
+                             "senate", "congress", "vote", "nomination"]
+        macro_keywords = ["fed", "rates", "interest rate", "gdp", "inflation", "regulation",
+                          "recession", "central bank", "cpi", "unemployment", "tariff"]
+        weather_keywords = ["temperature", "weather", "celsius", "fahrenheit", "miami",
+                            "amsterdam", "seoul", "high temperature"]
+
+        for kw in sports_keywords:
+            if kw in text_lower:
+                return "sports"
+        for kw in crypto_keywords:
+            if kw in text_lower:
+                return "crypto"
+        for kw in politics_keywords:
+            if kw in text_lower:
+                return "politics"
+        for kw in weather_keywords:
+            if kw in text_lower:
+                return "weather"
+        for kw in macro_keywords:
+            if kw in text_lower:
+                return "macro"
+        return "generic"
+
     def to_feature_dict(self) -> dict:
+        p = self.current_price
+        price_zone = None
+        distance_to_05 = None
+        distance_to_extremes = None
+        entropy = None
+        proximity_to_resolution = None
+        market_maturity = None
+        resolution_bucket = None
+        hours_to_resolution = None
+        if p is not None:
+            distance_to_05 = abs(p - 0.5)
+            distance_to_extremes = min(p, 1.0 - p) if 0 <= p <= 1 else None
+            if 0 < p < 1:
+                entropy = -(p * math.log2(p) + (1.0 - p) * math.log2(1.0 - p))
+            else:
+                entropy = 0.0
+            if p <= 0.2:
+                price_zone = "crisis"
+            elif p <= 0.4:
+                price_zone = "discount"
+            elif p <= 0.6:
+                price_zone = "fair"
+            elif p <= 0.8:
+                price_zone = "premium"
+            else:
+                price_zone = "extreme"
+
+        now = datetime.now(timezone.utc)
+        if self.end_date is not None:
+            remaining_sec = (self.end_date - now).total_seconds()
+            proximity_to_resolution = max(0.0, remaining_sec / 86400.0)
+            hours_to_resolution = max(0.0, remaining_sec / 3600.0)
+            if remaining_sec <= 3600:
+                resolution_bucket = "last_hour"
+            elif remaining_sec <= 86400:
+                resolution_bucket = "last_day"
+            elif remaining_sec <= 604800:
+                resolution_bucket = "last_week"
+            else:
+                resolution_bucket = "distant"
+
+        if self.created_at is not None and self.end_date is not None and self.end_date > self.created_at:
+            total = (self.end_date - self.created_at).total_seconds()
+            elapsed = (now - self.created_at).total_seconds()
+            market_maturity = min(1.0, max(0.0, elapsed / total))
+
+        archetype = self.classify_archetype(self.slug, None)
+
         return {
             "condition_id": self.condition_id,
             "market_id": self.market_id,
-            "current_price": self.current_price,
+            "current_price": p,
             "current_mid": self.current_mid,
             "spread": self.spread,
             "volume_5m": self.volume_window_5m,
@@ -215,4 +305,13 @@ class MarketContext:
             "whale_buy_volume_1h": self.whale_buy_volume_1h,
             "whale_sell_volume_1h": self.whale_sell_volume_1h,
             "regime": self.get_regime(),
+            "price_zone": price_zone,
+            "distance_to_0.5": distance_to_05,
+            "distance_to_extremes": distance_to_extremes,
+            "entropy": entropy,
+            "proximity_to_resolution_days": proximity_to_resolution,
+            "hours_to_resolution": hours_to_resolution,
+            "resolution_bucket": resolution_bucket,
+            "market_maturity": market_maturity,
+            "archetype": archetype,
         }

@@ -1,8 +1,14 @@
 import math
-import random
+import hashlib
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any
+
+
+def _deterministic_float(seed: str, min_val: float = 0.0, max_val: float = 1.0) -> float:
+    h = hashlib.sha256(seed.encode()).hexdigest()
+    norm = int(h[:8], 16) / 0xFFFFFFFF
+    return min_val + norm * (max_val - min_val)
 
 
 class OrderSide(Enum):
@@ -94,7 +100,7 @@ class ExecutionSimulator:
         total_cost = 0.0
         total_filled = 0.0
         fill_events = []
-        queue_pos = random.uniform(0.3, 0.8)
+        queue_pos = _deterministic_float(f"queue_{side.value}_{size}", 0.3, 0.8)
 
         for level in levels:
             if remaining <= 0:
@@ -102,7 +108,7 @@ class ExecutionSimulator:
             available = level.size * (1.0 if queue_pos <= 0.5 else 0.7)
             fill = min(remaining, available)
             fill_ratio = fill / available
-            queue_wait = queue_pos / (1.0 + random.random())
+            queue_wait = queue_pos / 1.5
             partial = fill < remaining and fill < available
             fill_events.append({
                 "price": level.price,
@@ -152,9 +158,45 @@ class ExecutionSimulator:
         slippage = base_slippage + impact * 0.5
         return min(slippage, 0.1)
 
+    def estimate_dynamic_slippage(
+        self,
+        size: float,
+        liquidity: float,
+        spread: float = 0.01,
+        volatility: float = 0.0,
+        market_archetype: str = "medium_liquidity",
+        mid_price: float = 0.5,
+    ) -> float:
+        if liquidity <= 0 or size <= 0:
+            return 0.02
+
+        archetype_mult = {
+            "high_liquidity": 0.5, "medium_liquidity": 1.0,
+            "low_liquidity": 2.0, "illiquid": 5.0,
+        }.get(market_archetype, 1.0)
+
+        impact = size / max(liquidity, 1)
+        base_slippage = 0.001
+        vol_surcharge = volatility * 0.05
+        spread_surcharge = spread * 0.5
+
+        slippage = (base_slippage + impact * 0.5 + vol_surcharge + spread_surcharge) * archetype_mult
+        return min(slippage, 0.25)
+
     def simulate_partial_fill(self, size: float, liquidity: float) -> tuple[float, float]:
         fill_prob = min(1.0, liquidity / (size * 10))
-        if random.random() > self.fill_ratio * fill_prob:
-            filled = size * random.uniform(0.3, 0.9)
+        threshold = self.fill_ratio * fill_prob
+        dice = _deterministic_float(f"partial_fill_{size}_{liquidity}")
+        if dice > threshold:
+            filled = size * _deterministic_float(f"partial_ratio_{size}_{liquidity}", 0.3, 0.9)
             return filled, size - filled
         return size, 0.0
+
+    def compute_edge_decay(self, base_edge: float, latencies_ms: list[int] | None = None) -> dict[str, float]:
+        if latencies_ms is None:
+            latencies_ms = [1000, 3000, 5000, 10000]
+        result = {}
+        for lat in latencies_ms:
+            decay_factor = max(0.01, 1.0 - (lat / 10000) * 0.5)
+            result[f"{lat}ms"] = round(base_edge * decay_factor, 6)
+        return result

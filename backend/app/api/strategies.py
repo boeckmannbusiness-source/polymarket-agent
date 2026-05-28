@@ -23,6 +23,22 @@ async def list_strategy_names():
     return {"strategies": get_strategy_names()}
 
 
+@router.get("/rankings")
+async def get_strategy_rankings(db: AsyncSession = Depends(get_db)):
+    names = get_strategy_names()
+    eval_service = SignalEvaluationService(db)
+    rankings = []
+    for name in names:
+        try:
+            summary = await eval_service.get_strategy_summary(name)
+            rankings.append(summary)
+        except Exception:
+            rankings.append({"strategy": name, "total_signals": 0})
+
+    rankings.sort(key=lambda r: r.get("sharpe_ratio", 0) or 0, reverse=True)
+    return rankings
+
+
 @router.get("/{strategy_name}")
 async def get_strategy_detail(strategy_name: str, db: AsyncSession = Depends(get_db)):
     try:
@@ -176,22 +192,6 @@ async def run_strategy_replay(
             for s in result.signals[:50]
         ],
     }
-
-
-@router.get("/rankings")
-async def get_strategy_rankings(db: AsyncSession = Depends(get_db)):
-    names = get_strategy_names()
-    eval_service = SignalEvaluationService(db)
-    rankings = []
-    for name in names:
-        try:
-            summary = await eval_service.get_strategy_summary(name)
-            rankings.append(summary)
-        except Exception:
-            rankings.append({"strategy": name, "total_signals": 0})
-
-    rankings.sort(key=lambda r: r.get("sharpe_ratio", 0) or 0, reverse=True)
-    return rankings
 
 
 @router.get("/{strategy_name}/regimes")

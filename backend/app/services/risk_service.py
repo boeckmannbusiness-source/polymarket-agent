@@ -20,18 +20,31 @@ class RiskCheckResult:
     cooldown_remaining: int | None = None
 
 
+VALID_SIDES = {"buy", "sell"}
+VALID_OUTCOMES = {"YES", "NO"}
+
+
 class RiskService:
     def __init__(self, db: AsyncSession):
         self.db = db
 
     async def validate_trade(
         self,
-        market_id: UUID,
+        market_id: UUID | None,
         side: str,
-        size: float,
-        confidence: float,
+        size: float | None,
+        confidence: float | None,
         agent_id: str | None = None,
     ) -> RiskCheckResult:
+        if market_id is None:
+            return RiskCheckResult(approved=False, reason="market_id is required")
+        if side not in VALID_SIDES:
+            return RiskCheckResult(approved=False, reason=f"Invalid side: {side}")
+        if size is None or size <= 0:
+            return RiskCheckResult(approved=False, reason=f"Invalid size: {size}")
+
+        if confidence is None:
+            confidence = 0.0
         if confidence < settings.MIN_CONFIDENCE_THRESHOLD:
             return RiskCheckResult(
                 approved=False,
@@ -99,7 +112,9 @@ class RiskService:
         )
         return abs(float(result.scalar() or 0))
 
-    async def _check_cooldown(self, market_id: UUID) -> int:
+    async def _check_cooldown(self, market_id: UUID | None) -> int:
+        if market_id is None:
+            return 0
         cutoff = datetime.now(timezone.utc) - timedelta(seconds=settings.COOLDOWN_MINUTES * 60)
         result = await self.db.execute(
             select(Trade.updated_at)

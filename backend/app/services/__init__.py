@@ -15,6 +15,7 @@ from .execution_simulator import ExecutionSimulator
 from .regime_service import RegimeService
 from .safety_service import SafetyService
 from .event_bridge import EventPersistenceBridge
+from .integrity_service import IntegrityService, get_integrity_counters
 
 __all__ = [
     "MarketService",
@@ -34,4 +35,6 @@ __all__ = [
     "RegimeService",
     "SafetyService",
     "EventPersistenceBridge",
+    "IntegrityService",
+    "get_integrity_counters",
 ]

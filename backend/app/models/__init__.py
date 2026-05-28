@@ -10,6 +10,8 @@ from .market_snapshot import MarketStateSnapshot
 from .portfolio import Position, PortfolioSnapshot, MarketCorrelation
 from .feature_store import FeatureSchemaVersion, FeatureLineage
 from .safety import SafetyState
+from .execution_trace import ExecutionTrace
+from .trade_attribution import TradeAttribution
 
 __all__ = [
     "Market",
@@ -33,4 +35,6 @@ __all__ = [
     "FeatureSchemaVersion",
     "FeatureLineage",
     "SafetyState",
+    "ExecutionTrace",
+    "TradeAttribution",
 ]

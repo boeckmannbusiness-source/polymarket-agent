@@ -1,10 +1,10 @@
 import asyncio
-from datetime import datetime, timezone
 
 from app.agents.base import BaseAgent
 from app.core.events import EventBus
 from app.core.logging import logger
 from app.database import async_session_factory
+from app.services.invariant_guard import validate_signal_fields, dead_letter_signals
 from app.services.risk_service import RiskService
 
 
@@ -21,6 +21,14 @@ class RiskAgent(BaseAgent):
                 messages = await EventBus.read_stream(r, "signal:generated", "risk_agent", "risk_1", block=10000)
 
                 for msg in messages:
+                    data = msg.get("data", {})
+                    errors = validate_signal_fields(data)
+                    if errors:
+                        dead_letter_signals.append({"data": data, "errors": errors, "stage": "risk_agent_reject"})
+                        logger.warning("risk_skip_invalid_signal", errors=errors, signal_id=data.get("signal_id"))
+                        await EventBus.ack_message(r, "signal:generated", "risk_agent", msg["id"])
+                        continue
+
                     await self.evaluate_signal(msg)
                     await EventBus.ack_message(r, "signal:generated", "risk_agent", msg["id"])
 
@@ -31,28 +39,51 @@ class RiskAgent(BaseAgent):
 
     async def evaluate_signal(self, msg: dict):
         data = msg.get("data", {})
-        confidence = data.get("confidence", 0.5)
-        signal_id = data.get("signal_id")
+        signal_id = data["signal_id"]
+        market_id = data.get("market_id") or data.get("market_condition_id")
+        confidence = data.get("confidence", 0.0)
+        if confidence is None:
+            confidence = 0.0
+        side = data.get("side", "buy")
+        outcome = data.get("outcome")
+        size = data.get("size")
+        if size is None:
+            size = 0.0
+        size = float(size)
 
         async with async_session_factory() as db:
             risk_service = RiskService(db)
             check = await risk_service.validate_trade(
-                market_id=None,
-                side="buy",
-                size=100,
+                market_id=market_id,
+                side=side,
+                size=size,
                 confidence=confidence,
                 agent_id=self.name,
             )
 
             if check.approved:
+                from app.services.pipeline_metrics import inc_signal
+                await inc_signal()
                 await EventBus.publish(
                     "trade:request",
                     "trade.risk_approved",
                     self.name,
-                    {"signal_id": signal_id, "confidence": confidence, "risk_check": str(check)},
+                    {
+                        "signal_id": signal_id,
+                        "market_id": market_id,
+                        "condition_id": data.get("market_condition_id"),
+                        "side": side,
+                        "outcome": outcome,
+                        "size": size,
+                        "confidence": confidence,
+                        "strategy": data.get("strategy", "unknown"),
+                        "risk_check": str(check),
+                    },
                 )
                 await self.log_event("risk_approved", {"signal_id": signal_id, "confidence": confidence})
             else:
+                from app.services.pipeline_metrics import inc_risk_rejected
+                await inc_risk_rejected()
                 await EventBus.publish(
                     "trade:request",
                     "trade.risk_rejected",

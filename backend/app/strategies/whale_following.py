@@ -31,7 +31,7 @@ class WhaleFollowingStrategy(BaseStrategy):
         if wallet_score and wallet_score < self.cfg.min_whale_win_rate:
             return None
 
-        direction = "BUY_YES" if side in ("buy", "YES") else "BUY_NO"
+        direction = "BUY_YES" if side.upper() in ("BUY", "YES") else "BUY_NO"
         size_ratio = min(size / 10_000, 1.0)
         confidence = 0.5 + (size_ratio * 0.3)
         if wallet_score:

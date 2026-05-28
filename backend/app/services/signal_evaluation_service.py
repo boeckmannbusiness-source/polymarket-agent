@@ -33,6 +33,7 @@ class SignalEvaluationService:
             entry_timestamp=replayed.entry_timestamp,
             entry_probability=replayed.signal.confidence,
             entry_confidence=replayed.signal.confidence,
+            signal_direction=replayed.signal.signal,
             outcome_5m=replayed.outcome_5m,
             probability_5m=replayed.probability_5m,
             pnl_5m=replayed.pnl_5m,
@@ -52,6 +53,7 @@ class SignalEvaluationService:
             max_adverse_excursion=replayed.max_adverse_excursion,
             reversal_count=replayed.reversal_count,
             holding_time_seconds=holding or None,
+            evaluation_epoch="post_semantic_fix",
         )
         self.db.add(outcome)
         await self.db.flush()
@@ -74,8 +76,19 @@ class SignalEvaluationService:
         if not events:
             return None
 
-        entry_price = signal.confidence
         entry_ts = signal.generated_at.replace(tzinfo=timezone.utc) if signal.generated_at.tzinfo is None else signal.generated_at
+
+        entry_price_result = await self.db.execute(
+            select(MarketEvent.price)
+            .where(
+                MarketEvent.market_id == signal.market_id,
+                MarketEvent.timestamp <= entry_ts,
+            )
+            .order_by(desc(MarketEvent.timestamp))
+            .limit(1)
+        )
+        entry_price_row = entry_price_result.one_or_none()
+        entry_price = float(entry_price_row[0]) if entry_price_row else float(signal.confidence)
 
         checkpoints = {
             "5m": entry_ts + timedelta(minutes=5),
@@ -206,11 +219,11 @@ class SignalEvaluationService:
         timed_out = sum(1 for o in outcomes if o.outcome_close is None)
 
         win_rate = wins / total if total > 0 else 0
-        pnls = [o.pnl_close or 0 for o in outcomes if o.pnl_close is not None]
+        pnls = [float(o.pnl_close) for o in outcomes if o.pnl_close is not None]
         avg_pnl = sum(pnls) / len(pnls) if pnls else 0
 
-        win_pnls = [o.pnl_close or 0 for o in outcomes if o.outcome_close == "WIN"]
-        loss_pnls = [o.pnl_close or 0 for o in outcomes if o.outcome_close == "LOSS"]
+        win_pnls = [float(o.pnl_close) for o in outcomes if o.outcome_close == "WIN" and o.pnl_close is not None]
+        loss_pnls = [float(o.pnl_close) for o in outcomes if o.outcome_close == "LOSS" and o.pnl_close is not None]
         avg_win = sum(win_pnls) / len(win_pnls) if win_pnls else 0
         avg_loss = abs(sum(loss_pnls) / len(loss_pnls)) if loss_pnls else 0
         expectancy = (win_rate * avg_win) - ((1 - win_rate) * avg_loss) if avg_loss > 0 else 0
