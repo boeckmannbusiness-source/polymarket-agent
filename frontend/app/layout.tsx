@@ -23,6 +23,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
                 <a href="/signals" className="hover:text-white transition-colors">Signals</a>
                 <a href="/trades" className="hover:text-white transition-colors">Trades</a>
                 <a href="/agents" className="hover:text-white transition-colors">Agents</a>
+                <a href="/cockpit" className="hover:text-white transition-colors text-[var(--primary)] font-semibold">Cockpit</a>
               </div>
             </div>
             <div className="flex items-center gap-3">

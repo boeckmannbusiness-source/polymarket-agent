@@ -4,10 +4,9 @@ from datetime import datetime, timezone, timedelta
 from dataclasses import dataclass
 
 from app.core.system_mode import get_mode_manager, SystemMode, _MODE_ORDER
+from app.core.mode_context import MODE_CONTEXTS
 from app.database import async_session_factory
 from app.models.system_mode import SystemModeTransition
-from app.core.metrics import mode_flips_total, mode_escalation_chain_depth, mode_proposal_rejected_total
-from app.services.pipeline_metrics import get_metrics as get_pipeline_metrics
 
 router = APIRouter()
 
@@ -241,9 +240,6 @@ async def cockpit_explanation():
 
 
 # ── helpers ─────────────────────────────────────────
-
-from app.core.mode_context import MODE_CONTEXTS
-
 
 def _compute_time_in_mode(transitions: list[SystemModeTransition]) -> dict[str, float]:
     if not transitions:
