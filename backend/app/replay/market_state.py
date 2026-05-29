@@ -55,6 +55,12 @@ class MarketContext:
     whale_sell_volume_1h: float = 0.0
     whale_pressure: float = 0.0
 
+    _ema_volatility: float | None = field(init=False, default=None)
+    _ema_alpha: float = field(init=False, default=0.3)
+    _regime_persistence_count: int = field(init=False, default=3)
+    _current_regime: str = field(init=False, default="normal")
+    _regime_confirmations: int = field(init=False, default=0)
+
     last_event_timestamp: datetime | None = None
 
     def update_trade(self, timestamp: datetime, price: float, size: float, side: str,
@@ -149,8 +155,24 @@ class MarketContext:
         variance = sum((p - mean) ** 2 for p in prices) / len(prices)
         return variance ** 0.5
 
+    def _has_sufficient_window_coverage(self, window_seconds: int) -> bool:
+        if not self.last_event_timestamp or len(self.price_history) < 2:
+            return False
+        cutoff_ts = self.last_event_timestamp.timestamp() - window_seconds
+        closest_ts, closest_diff = None, float("inf")
+        for ts, _ in self.price_history:
+            diff = abs(ts.timestamp() - cutoff_ts)
+            if diff < closest_diff:
+                closest_diff = diff
+                closest_ts = ts.timestamp()
+        if closest_ts is None:
+            return False
+        return closest_diff <= window_seconds * 0.5
+
     def get_momentum(self, window_seconds: int = 3600) -> float | None:
         if not self.current_price or len(self.price_history) < 2 or not self.last_event_timestamp:
+            return None
+        if not self._has_sufficient_window_coverage(window_seconds):
             return None
         cutoff_ts = self.last_event_timestamp.timestamp() - window_seconds
         best, best_diff = None, float("inf")
@@ -178,7 +200,7 @@ class MarketContext:
             return self.outcome_prices.get("No") or self.outcome_prices.get("no") or self.current_price
         return self.current_price
 
-    def get_regime(self) -> str:
+    def _compute_raw_regime(self) -> str:
         vol = self.get_volatility(3600)
         mom = self.get_momentum(3600)
         if self.current_price is None or self.current_mid is None:
@@ -195,6 +217,26 @@ class MarketContext:
         if mom and abs(mom) < 0.005:
             return "mean_reverting"
         return "normal"
+
+    def get_regime(self) -> str:
+        if self._ema_volatility is None:
+            raw_vol = self.get_volatility(3600)
+            self._ema_volatility = raw_vol if raw_vol is not None else 0.0
+        else:
+            raw_vol = self.get_volatility(3600)
+            if raw_vol is not None:
+                self._ema_volatility = (
+                    self._ema_alpha * raw_vol + (1.0 - self._ema_alpha) * self._ema_volatility
+                )
+        raw_regime = self._compute_raw_regime()
+        if raw_regime == self._current_regime:
+            self._regime_confirmations = min(self._regime_confirmations + 1, self._regime_persistence_count)
+        else:
+            self._regime_confirmations -= 1
+            if self._regime_confirmations <= 0:
+                self._current_regime = raw_regime
+                self._regime_confirmations = 0
+        return self._current_regime
 
     @staticmethod
     def classify_archetype(slug: str | None, title: str | None) -> str:

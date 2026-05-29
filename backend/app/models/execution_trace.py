@@ -49,6 +49,7 @@ class ExecutionTrace(Base):
 
     strategy_name: Mapped[str | None] = mapped_column(String(64), nullable=True)
 
+    correlation_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True, index=True)
     signal_timestamp: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     execution_timestamp: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

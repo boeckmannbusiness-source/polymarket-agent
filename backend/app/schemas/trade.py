@@ -16,6 +16,7 @@ class TradeCreateRequest(BaseModel):
     take_profit: float | None = None
     reason: str | None = None
     agent_id: str | None = None
+    correlation_id: str | None = None
 
 
 class TradeResponse(BaseModel):

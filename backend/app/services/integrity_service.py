@@ -1,4 +1,5 @@
 import math
+import uuid
 from datetime import datetime, timezone
 from typing import Any
 
@@ -109,12 +110,15 @@ class IntegrityService:
         risk_reason: str | None = None,
         market_price_at_entry: float | None = None,
         integrity_failures: list[str] | None = None,
+        correlation_id: str | None = None,
     ) -> ExecutionTrace | None:
         try:
+            cid = uuid.UUID(correlation_id) if correlation_id and isinstance(correlation_id, str) else correlation_id
             trace = ExecutionTrace(
                 trade_id=trade.id,
                 signal_id=trade.signal_id,
                 market_id=trade.market_id,
+                correlation_id=cid,
                 signal_payload=signal_payload,
                 risk_approved=risk_approved,
                 risk_reason=risk_reason,
@@ -155,6 +159,7 @@ class IntegrityService:
         risk_approved: bool | None = None,
         risk_reason: str | None = None,
         market_price_at_entry: float | None = None,
+        correlation_id: str | None = None,
     ) -> tuple[ExecutionTrace | None, list[str]]:
         signal: Signal | None = None
         if trade.signal_id:
@@ -170,5 +175,6 @@ class IntegrityService:
             risk_reason=risk_reason,
             market_price_at_entry=market_price_at_entry,
             integrity_failures=failures,
+            correlation_id=correlation_id,
         )
         return trace, failures

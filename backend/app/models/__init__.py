@@ -12,6 +12,8 @@ from .feature_store import FeatureSchemaVersion, FeatureLineage
 from .safety import SafetyState
 from .execution_trace import ExecutionTrace
 from .trade_attribution import TradeAttribution
+from .strategy_allocation import StrategyAllocationState
+from .system_mode import SystemModeTransition
 
 __all__ = [
     "Market",
@@ -37,4 +39,6 @@ __all__ = [
     "SafetyState",
     "ExecutionTrace",
     "TradeAttribution",
+    "StrategyAllocationState",
+    "SystemModeTransition",
 ]

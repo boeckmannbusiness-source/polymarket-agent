@@ -3,6 +3,7 @@ import asyncio
 from app.agents.base import BaseAgent
 from app.core.events import EventBus
 from app.core.logging import logger
+from app.core.timing import record_latency
 from app.database import async_session_factory
 from app.services.invariant_guard import validate_signal_fields, dead_letter_signals
 from app.services.risk_service import RiskService
@@ -38,7 +39,9 @@ class RiskAgent(BaseAgent):
             await asyncio.sleep(0.5)
 
     async def evaluate_signal(self, msg: dict):
+        _start = __import__("time").perf_counter_ns()
         data = msg.get("data", {})
+        correlation_id = msg.get("correlation_id")
         if not isinstance(data, dict):
             logger.warning("risk_skip_invalid_data_type", type=type(data).__name__)
             return
@@ -85,8 +88,9 @@ class RiskAgent(BaseAgent):
                         "strategy": data.get("strategy", "unknown"),
                         "risk_check": str(check),
                     },
+                    correlation_id=correlation_id,
                 )
-                await self.log_event("risk_approved", {"signal_id": signal_id, "confidence": confidence})
+                await self.log_event("risk_approved", {"signal_id": signal_id, "confidence": confidence}, correlation_id=correlation_id)
             else:
                 from app.services.pipeline_metrics import inc_risk_rejected
                 await inc_risk_rejected()
@@ -95,5 +99,8 @@ class RiskAgent(BaseAgent):
                     "trade.risk_rejected",
                     self.name,
                     {"signal_id": signal_id, "reason": check.reason},
+                    correlation_id=correlation_id,
                 )
-                await self.log_event("risk_rejected", {"signal_id": signal_id, "reason": check.reason})
+                await self.log_event("risk_rejected", {"signal_id": signal_id, "reason": check.reason}, correlation_id=correlation_id)
+
+            record_latency("risk_evaluation", (__import__("time").perf_counter_ns() - _start) / 1_000_000)

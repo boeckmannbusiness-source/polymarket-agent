@@ -203,18 +203,36 @@ class RiskOverlay:
 
     async def _check_ws_stall(self) -> RiskState:
         ws_config_cutoff = datetime.now(timezone.utc) - timedelta(minutes=10)
-        result = await self.db.execute(
-            select(func.count())
-            .select_from(MarketEvent)
-            .where(MarketEvent.timestamp >= ws_config_cutoff)
-        )
-        event_count = result.scalar() or 0
+        db_event_check = True
+        try:
+            result = await self.db.execute(
+                select(func.count())
+                .select_from(MarketEvent)
+                .where(MarketEvent.timestamp >= ws_config_cutoff)
+            )
+            event_count = result.scalar() or 0
+            if event_count == 0:
+                db_event_check = False
+        except Exception:
+            db_event_check = False
 
-        if event_count == 0:
+        ws_stall_timed_out = False
+        if self._last_ws_timestamp:
+            elapsed = (datetime.now(timezone.utc) - self._last_ws_timestamp).total_seconds()
+            if elapsed > settings.WS_STALL_SECONDS:
+                ws_stall_timed_out = True
+
+        if not db_event_check or ws_stall_timed_out:
+            reason_parts = []
+            if not db_event_check:
+                reason_parts.append("no_db_events_10min")
+            if ws_stall_timed_out:
+                elapsed = (datetime.now(timezone.utc) - self._last_ws_timestamp).total_seconds()
+                reason_parts.append(f"ws_stalled_{elapsed:.0f}s")
             self._cooldown_end = datetime.now(timezone.utc) + timedelta(minutes=5)
             return RiskState(
                 status="STOPPED",
-                reason=f"ws_ingestion_stalled_no_events_in_10min",
+                reason=f"ws_ingestion_stalled:{','.join(reason_parts)}",
                 cooldown_until=self._cooldown_end,
             )
 

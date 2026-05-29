@@ -46,7 +46,11 @@ class EventBus:
         if stream_or_channel in EventBus.PUBSUB_CHANNELS:
             await r.publish(stream_or_channel, json.dumps(event))
         else:
-            await r.xadd(stream_or_channel, event, maxlen=settings.REDIS_STREAM_MAXLEN)
+            maxlen = settings.REDIS_STREAM_MAXLEN
+            if settings.STREAM_TRIM_APPROX:
+                await r.xadd(stream_or_channel, event, maxlen=int(maxlen), approximate=True)
+            else:
+                await r.xadd(stream_or_channel, event, maxlen=maxlen)
 
     @staticmethod
     async def subscribe_to_stream(stream: str, group: str, consumer: str):
@@ -72,6 +76,27 @@ class EventBus:
                     except (json.JSONDecodeError, TypeError):
                         pass
                     messages.append({"stream": stream_name, "id": msg_id, **msg_data})
+        return messages
+
+    @staticmethod
+    async def read_pending(r, stream: str, group: str, consumer: str, count: int = 100) -> list[dict[str, Any]]:
+        results = await r.xpending_range(stream, group, min="-", max="+", count=count, consumername=consumer)
+        messages = []
+        for entry in results:
+            msg_id = entry.get("message_id") if isinstance(entry, dict) else entry[0]
+            msg_data = {}
+            try:
+                raw = await r.xrange(stream, min=msg_id, max=msg_id, count=1)
+                if raw:
+                    _, fields = raw[0]
+                    msg_data = dict(fields)
+                    try:
+                        msg_data["data"] = json.loads(msg_data.get("data", "{}"))
+                    except (json.JSONDecodeError, TypeError):
+                        pass
+            except Exception:
+                pass
+            messages.append({"stream": stream, "id": msg_id, **msg_data})
         return messages
 
     @staticmethod

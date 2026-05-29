@@ -1,4 +1,5 @@
 import enum
+import hashlib
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from typing import Any
@@ -18,6 +19,13 @@ class ReplayMode(enum.Enum):
     SIGNAL_ONLY = "signal_only"
     PAPER_EXECUTION = "paper_execution"
     FULL_SIMULATION = "full_simulation"
+    PRODUCTION_SIMULATED = "production_simulated"
+
+
+_SIMULATED_DEDUP_DROP_RATE = 0.01
+_SIMULATED_RECONNECT_JITTER_MS = (500, 3000)
+_SIMULATED_PROCESSING_DELAY_MS = (10, 200)
+_SIMULATED_EVENT_DROP_RATE = 0.002
 
 
 @dataclass
@@ -156,6 +164,18 @@ class ReplayEngine:
         pending_by_cid: dict[str, list[PendingOutcome]] = {}
 
         for event in events:
+            if mode == ReplayMode.PRODUCTION_SIMULATED:
+                _event_digest = hashlib.sha256(f"{event.id}:{event.timestamp.timestamp()}".encode()).hexdigest()
+                _event_drop_val = int(_event_digest[:8], 16) / 0xFFFFFFFF
+                if _event_drop_val < _SIMULATED_EVENT_DROP_RATE:
+                    result.total_events_processed -= 1
+                    continue
+                _delay_val = int(_event_digest[8:16], 16) / 0xFFFFFFFF
+                _sim_processing_delay = (_SIMULATED_PROCESSING_DELAY_MS[0] + _delay_val * (_SIMULATED_PROCESSING_DELAY_MS[1] - _SIMULATED_PROCESSING_DELAY_MS[0])) / 1000.0
+                if _sim_processing_delay > 0:
+                    import time as _time
+                    _time.sleep(_sim_processing_delay)
+
             cid = event.market.condition_id if event.market else str(event.market_id)
             if cid not in contexts:
                 outcomes = _parse_outcomes(event.market.outcomes) if event.market and event.market.outcomes else None
@@ -190,6 +210,12 @@ class ReplayEngine:
                 and cid not in last_signal_time
                 or (ts - last_signal_time.get(cid, datetime.min.replace(tzinfo=timezone.utc))).total_seconds() >= signal_interval_seconds
             )
+
+            if mode == ReplayMode.PRODUCTION_SIMULATED and should_signal:
+                _dedup_digest = hashlib.sha256(f"dedup:{event.id}:{event.timestamp.timestamp()}".encode()).hexdigest()
+                _dedup_val = int(_dedup_digest[:8], 16) / 0xFFFFFFFF
+                if _dedup_val < _SIMULATED_DEDUP_DROP_RATE:
+                    should_signal = False
 
             if should_signal and ctx.current_price is not None:
                 features = self.feature_generator.generate(ctx)
@@ -301,7 +327,7 @@ class ReplayEngine:
             select(MarketEvent)
             .options(selectinload(MarketEvent.market))
             .where(MarketEvent.timestamp.between(start_time, end_time))
-            .order_by(MarketEvent.timestamp)
+            .order_by(MarketEvent.timestamp, MarketEvent.id)
         )
 
         if market_ids:

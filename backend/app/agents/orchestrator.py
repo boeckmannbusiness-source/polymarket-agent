@@ -28,6 +28,11 @@ class Orchestrator:
             self.agents["monitoring"] = MonitoringAgent()
 
     async def start_all(self):
+        from app.core.system_mode import get_mode_manager
+        if not get_mode_manager().can_process():
+            logger.warning("orchestrator_start_blocked_system_mode")
+            return
+
         logger.info("orchestrator_starting", agent_count=len(self.agents))
         await EventBus.publish("agent:event", "orchestrator.started", "orchestrator", {})
 
@@ -35,6 +40,7 @@ class Orchestrator:
         await asyncio.gather(*tasks)
 
     async def stop_all(self):
+        from app.core.system_mode import get_mode_manager
         logger.info("orchestrator_stopping")
         await EventBus.publish("agent:event", "orchestrator.stopped", "orchestrator", {})
         for name, agent in self.agents.items():

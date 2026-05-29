@@ -1,3 +1,4 @@
+import uuid
 from uuid import UUID
 from datetime import datetime, timedelta, timezone
 
@@ -50,11 +51,13 @@ class SignalService:
         source_agent: str | None = None,
         source_data: dict | None = None,
         ttl_minutes: int | None = None,
+        correlation_id: str | None = None,
     ) -> Signal:
         expired_at = None
         if ttl_minutes:
             expired_at = datetime.now(timezone.utc).replace(microsecond=0) + timedelta(minutes=ttl_minutes)
 
+        cid = uuid.UUID(correlation_id) if correlation_id and isinstance(correlation_id, str) else correlation_id
         signal = Signal(
             market_id=market_id,
             signal_type=signal_type,
@@ -66,6 +69,7 @@ class SignalService:
             source_agent=source_agent,
             source_data=source_data,
             expired_at=expired_at,
+            correlation_id=cid,
         )
         self.db.add(signal)
         await self.db.flush()

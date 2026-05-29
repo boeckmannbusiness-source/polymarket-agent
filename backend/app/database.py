@@ -11,7 +11,7 @@ engine = create_async_engine(
     max_overflow=settings.DATABASE_MAX_OVERFLOW,
     pool_pre_ping=True,
     pool_recycle=300,
-    connect_args={"timeout": 10, "command_timeout": 30},
+    connect_args={"timeout": 10, "command_timeout": 30, "options": "-c statement_timeout=15000"},
     echo=settings.APP_DEBUG,
 )
 
@@ -37,6 +37,14 @@ async def get_db() -> AsyncSession:
 async def init_db():
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+        # mode transitions table (created by metadata but ensure index)
+        try:
+            await conn.execute(text("""
+                CREATE INDEX IF NOT EXISTS ix_system_mode_transitions_created_at
+                ON system_mode_transitions(created_at)
+            """))
+        except Exception:
+            pass
         await conn.execute(text("""
             ALTER TABLE backtest_runs
             ADD COLUMN IF NOT EXISTS sortino_ratio NUMERIC(12, 6),
@@ -45,3 +53,10 @@ async def init_db():
             ADD COLUMN IF NOT EXISTS mode VARCHAR(32),
             ADD COLUMN IF NOT EXISTS error_message TEXT
         """))
+        for table, col in [("trades", "correlation_id"), ("agent_logs", "correlation_id"),
+                           ("execution_traces", "correlation_id"), ("signals", "correlation_id")]:
+            try:
+                await conn.execute(text(f"ALTER TABLE {table} ADD COLUMN IF NOT EXISTS {col} UUID"))
+                await conn.execute(text(f"CREATE INDEX IF NOT EXISTS ix_{table}_{col} ON {table}({col})"))
+            except Exception:
+                pass

@@ -8,6 +8,7 @@ from app.config import settings
 from app.models import Trade, Market
 from app.schemas.trade import TradeCreateRequest
 from app.core.logging import logger
+from app.core.timing import record_latency
 from app.services.risk_service import RiskService
 from app.engines.paper_engine import PaperEngine
 from app.services.integrity_service import IntegrityService
@@ -50,6 +51,7 @@ class TradeService:
         return trade
 
     async def create_trade(self, request: TradeCreateRequest) -> Trade:
+        _e2e_start = __import__("time").perf_counter_ns()
         if self._emergency_stop:
             raise TradeExecutionError("Emergency stop is active. No trades allowed.")
 
@@ -60,6 +62,7 @@ class TradeService:
         if not market.scalar_one_or_none():
             raise MarketNotFoundError(f"Market {request.market_id} not found")
 
+        from sqlalchemy.exc import IntegrityError
         existing = await self.db.execute(
             select(Trade).where(
                 Trade.market_id == request.market_id,
@@ -74,6 +77,11 @@ class TradeService:
                 f"Duplicate position rejected: market {request.market_id} already has open position on {request.outcome}"
             )
 
+        if MICRO_LIVE_SAFE_MODE:
+            violation = await self._check_micro_live_restrictions(request)
+            if violation:
+                raise TradeExecutionError(f"Micro-live safety mode: {violation}")
+
         from app.services.global_risk_guard import GlobalRiskGuard
         guard = GlobalRiskGuard(self.db)
         exposure_check = await guard.check_exposure(
@@ -83,23 +91,12 @@ class TradeService:
             proposed_price=float(request.price or 0),
         )
         if not exposure_check.approved:
+            from app.services.pipeline_metrics import inc_exposure_rejection
+            await inc_exposure_rejection()
             raise TradeExecutionError(f"Exposure limit: {exposure_check.reason}")
 
-        if MICRO_LIVE_SAFE_MODE:
-            violation = await self._check_micro_live_restrictions(request)
-            if violation:
-                raise TradeExecutionError(f"Micro-live safety mode: {violation}")
-
-        risk_check = await self.risk_service.validate_trade(
-            market_id=request.market_id,
-            side=request.side,
-            size=request.size,
-            confidence=1.0,
-            agent_id=request.agent_id,
-        )
-
-        if not risk_check.approved:
-            raise TradeExecutionError(f"Risk check failed: {risk_check.reason}")
+        from app.services.pipeline_metrics import inc_signal
+        await inc_signal()
 
         from app.services.portfolio_allocator import PortfolioAllocator
         allocator = PortfolioAllocator(self.db)
@@ -115,10 +112,12 @@ class TradeService:
         if MICRO_LIVE_SAFE_MODE and adjusted_size > 1:
             adjusted_size = 1.0
 
+        cid = uuid.UUID(request.correlation_id) if request.correlation_id and isinstance(request.correlation_id, str) else request.correlation_id
         trade = Trade(
             id=uuid.uuid4(),
             market_id=request.market_id,
             signal_id=request.signal_id,
+            correlation_id=cid,
             trade_type=settings.TRADING_MODE,
             status="pending",
             side=request.side,
@@ -130,7 +129,21 @@ class TradeService:
             agent_id=request.agent_id,
         )
         self.db.add(trade)
-        await self.db.flush()
+        try:
+            await self.db.flush()
+        except IntegrityError as e:
+            await self.db.rollback()
+            from app.services.pipeline_metrics import inc_duplicate_market_rejection
+            await inc_duplicate_market_rejection()
+            logger.warning(
+                "trade_duplicate_integrity_error",
+                market_id=str(request.market_id),
+                outcome=request.outcome,
+                error=str(e),
+            )
+            raise TradeExecutionError(
+                f"Duplicate position rejected (DB constraint): market {request.market_id} on {request.outcome}"
+            )
 
         if request.order_type == "market":
             result = await self.paper_engine.execute_market_order(trade)
@@ -143,13 +156,15 @@ class TradeService:
 
         await self.db.flush()
 
-        _, integrity_failures = await self.integrity.verify_and_trace(trade)
+        _, integrity_failures = await self.integrity.verify_and_trace(trade, correlation_id=request.correlation_id)
         if integrity_failures:
             logger.warning("integrity_failures_on_create",
                         trade_id=str(trade.id),
                         count=len(integrity_failures),
                         failures=integrity_failures)
 
+        e2e_ms = (__import__("time").perf_counter_ns() - _e2e_start) / 1_000_000
+        record_latency("end_to_end", e2e_ms)
         return trade
 
     async def _check_micro_live_restrictions(self, request: TradeCreateRequest) -> str | None:

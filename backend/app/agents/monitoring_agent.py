@@ -37,7 +37,8 @@ class MonitoringAgent(BaseAgent):
                 messages = await EventBus.read_stream(r, "agent:event", "monitoring_agent", "mon_1", block=5000)
 
                 for msg in messages:
-                    await self.process_event(msg)
+                    correlation_id = msg.get("correlation_id")
+                    await self.process_event(msg, correlation_id)
                     if msg.get("stream") == "agent:event":
                         await EventBus.ack_message(r, "agent:event", "monitoring_agent", msg["id"])
 
@@ -63,7 +64,7 @@ class MonitoringAgent(BaseAgent):
             )
             self.metrics["total_pnl"] = float(total_pnl.scalar() or 0)
 
-    async def process_event(self, msg: dict):
+    async def process_event(self, msg: dict, correlation_id: str | None = None):
         data = msg.get("data", {})
         event_type = msg.get("event_type", "")
 

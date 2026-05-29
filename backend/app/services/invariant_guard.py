@@ -1,10 +1,12 @@
+from collections import deque
+
 from app.core.logging import logger
 
 VALID_OUTCOMES = {"YES", "NO"}
 VALID_SIDES = {"buy", "sell"}
 
-
-dead_letter_signals: list[dict] = []
+_MAX_DEAD_LETTER = 5000
+dead_letter_signals: deque = deque(maxlen=_MAX_DEAD_LETTER)
 
 
 def validate_signal_fields(data: dict) -> list[str]:

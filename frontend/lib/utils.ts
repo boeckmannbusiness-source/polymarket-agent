@@ -1,3 +1,10 @@
+import { type ClassValue, clsx } from "clsx";
+import { twMerge } from "tailwind-merge";
+
+export function cn(...inputs: ClassValue[]) {
+  return twMerge(clsx(inputs));
+}
+
 export function formatPnl(pnl: number | null): string {
   if (pnl === null) return "-";
   const prefix = pnl >= 0 ? "+" : "";
@@ -45,3 +52,37 @@ export function timeAgo(dateStr: string | null): string {
   const days = Math.floor(hours / 24);
   return `${days}d ago`;
 }
+
+// ── Mode colors ─────────────────────────────────────
+
+export const MODE_COLORS: Record<string, string> = {
+  normal: "#00C853",
+  degraded: "#FFD600",
+  protected: "#FF9800",
+  read_only: "#9C27B0",
+  emergency_stop: "#FF1744",
+};
+
+export const MODE_COLORS_CSS: Record<string, string> = {
+  normal: "text-green-400",
+  degraded: "text-yellow-400",
+  protected: "text-orange-400",
+  read_only: "text-purple-400",
+  emergency_stop: "text-red-400",
+};
+
+export const MODE_BG_CSS: Record<string, string> = {
+  normal: "bg-green-500/20 border-green-500/30",
+  degraded: "bg-yellow-500/20 border-yellow-500/30",
+  protected: "bg-orange-500/20 border-orange-500/30",
+  read_only: "bg-purple-500/20 border-purple-500/30",
+  emergency_stop: "bg-red-500/20 border-red-500/30",
+};
+
+export const MODE_INDICES: Record<string, number> = {
+  normal: 0,
+  degraded: 1,
+  protected: 2,
+  read_only: 3,
+  emergency_stop: 4,
+};

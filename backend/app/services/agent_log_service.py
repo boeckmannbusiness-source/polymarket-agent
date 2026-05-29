@@ -1,3 +1,4 @@
+import uuid
 from datetime import datetime, timezone
 
 from sqlalchemy import select, desc
@@ -10,11 +11,13 @@ class AgentLogService:
     def __init__(self, db: AsyncSession):
         self.db = db
 
-    async def log(self, agent_name: str, event_type: str, data: dict | None = None):
+    async def log(self, agent_name: str, event_type: str, data: dict | None = None, correlation_id: str | None = None):
+        cid = uuid.UUID(correlation_id) if correlation_id and isinstance(correlation_id, str) else correlation_id
         entry = AgentLog(
             agent_name=agent_name,
             event_type=event_type,
             data=data,
+            correlation_id=cid,
         )
         self.db.add(entry)
         await self.db.flush()

@@ -4,8 +4,12 @@ from datetime import datetime, timezone
 
 from sqlalchemy import select
 
+from app.config import settings
 from app.core.events import EventBus
 from app.core.logging import logger
+from app.core.dedup import is_duplicate_event, mark_event_processed
+from app.core.metrics import dlq_size, pel_depth, dlq_replay_success_total, dlq_replay_failures_total, recovery_loop_errors_total
+from app.core.circuit_breaker import CircuitBreaker
 from app.database import async_session_factory
 from app.models import MarketEvent, Market
 
@@ -23,17 +27,33 @@ class EventPersistenceBridge:
         self._dropped_by_type: dict[str, int] = {}
         self._dlq: list[dict] = []
 
-        # Duplicate detection (in-memory LRU)
+        self._persist_semaphore = asyncio.Semaphore(5)
+        self._circuit_breaker = CircuitBreaker("persistence_bridge", failure_threshold=10, window_seconds=60, recovery_seconds=30)
+
+        # Duplicate detection (Redis-backed, L1 in-memory LRU)
         self._recent_hashes: set[str] = set()
         self._recent_hash_order: list[str] = []
         self._max_hash_cache = 2000
         self._duplicate_events_detected = 0
+        self._redis_dedup_hits = 0
+        self._redis_dedup_skipped = 0
+
+        # DLQ replay stats
+        self._dlq_replayed = 0
+        self._dlq_replay_failures = 0
+
+        # Pending recovery stats
+        self._pending_claimed = 0
+        self._pending_dlq_transferred = 0
 
     # ── Lifecycle ────────────────────────────────────────────
 
     async def start(self):
         self.running = True
         self._tasks.append(asyncio.create_task(self._consume_market_events()))
+        self._tasks.append(asyncio.create_task(self._pending_recovery_loop()))
+        if settings.DLQ_REPLAY_ENABLED:
+            self._tasks.append(asyncio.create_task(self._dlq_replay_loop()))
         logger.info("event_persistence_bridge_started")
 
     async def consume_pending(self, count: int = 100) -> dict:
@@ -59,20 +79,106 @@ class EventPersistenceBridge:
             t.cancel()
         await asyncio.gather(*self._tasks, return_exceptions=True)
 
+    # ── Pending message recovery ─────────────────────────────
+
+    async def _pending_recovery_loop(self):
+        await asyncio.sleep(30)
+        while self.running:
+            try:
+                r = await EventBus.subscribe_to_stream("market:data", "persistence_bridge", "writer_1")
+                pending_summary = await r.xpending("market:data", "persistence_bridge")
+                if pending_summary:
+                    total_pending = pending_summary[0] if isinstance(pending_summary, (list, tuple)) else 0
+                    pel_depth.labels(stream="market:data", group="persistence_bridge").set(total_pending)
+                    if total_pending > 0:
+                        idle_ms = settings.PENDING_IDLE_TIMEOUT * 1000
+                        claimed = await r.xautoclaim(
+                            "market:data", "persistence_bridge", "writer_1",
+                            min_idle_time=idle_ms,
+                            count=settings.PENDING_CLAIM_COUNT,
+                        )
+                        if claimed and len(claimed) >= 2:
+                            claimed_ids = claimed[1] if isinstance(claimed[1], list) else []
+                            for msg_id, msg_data in claimed_ids:
+                                if isinstance(msg_data, list):
+                                    msg_data = dict(msg_data)
+                                try:
+                                    msg_data["data"] = msg_data.get("data", {})
+                                    if isinstance(msg_data.get("data"), str):
+                                        import json
+                                        msg_data["data"] = json.loads(msg_data["data"])
+                                except Exception:
+                                    pass
+                                msg = {"stream": "market:data", "id": msg_id, **msg_data}
+                                success = await self._persist_with_retry(msg)
+                                if success:
+                                    await EventBus.ack_message(r, "market:data", "persistence_bridge", msg_id)
+                                    self._processed += 1
+                                    self._pending_claimed += 1
+                                else:
+                                    retry_key = f"bridge_retry:{msg_id}"
+                                    retry_count = getattr(self, "_retry_map", {}).get(retry_key, 0) + 1
+                                    if not hasattr(self, "_retry_map"):
+                                        self._retry_map = {}
+                                    self._retry_map[retry_key] = retry_count
+                                    if retry_count > settings.PENDING_MAX_RETRIES:
+                                        dlq_entry = {
+                                            "original_stream": "market:data",
+                                            "group": "persistence_bridge",
+                                            "msg_id": msg_id,
+                                            "retry_count": retry_count,
+                                            "error": "max_retries_exceeded_in_recovery",
+                                            "timestamp": datetime.now(timezone.utc).isoformat(),
+                                        }
+                                        try:
+                                            await r.xadd(settings.PENDING_DLQ_STREAM, dlq_entry, maxlen=5000)
+                                        except Exception:
+                                            pass
+                                        await EventBus.ack_message(r, "market:data", "persistence_bridge", msg_id)
+                                        self._pending_dlq_transferred += 1
+                                        logger.warning("bridge_pel_dlq", msg_id=msg_id, retry_count=retry_count)
+                        logger.info(
+                            "bridge_pel_cycle",
+                            pending_total=total_pending,
+                            claimed=self._pending_claimed,
+                            dlq=self._pending_dlq_transferred,
+                        )
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                logger.error("bridge_pel_error", error=str(e))
+            await asyncio.sleep(settings.PENDING_RECOVERY_INTERVAL)
+
     # ── Consumer loop ────────────────────────────────────────
 
     async def _consume_market_events(self):
         r = await EventBus.subscribe_to_stream("market:data", "persistence_bridge", "writer_1")
         while self.running:
             try:
+                from app.core.system_mode import get_mode_manager
+                mgr = get_mode_manager()
+                if not mgr.can_process():
+                    await asyncio.sleep(5)
+                    continue
+
+                cb_state = self._circuit_breaker.state
+                if cb_state.name == "OPEN":
+                    logger.warning("circuit_breaker_open", breaker=self._circuit_breaker.name)
+                    await asyncio.sleep(5)
+                    continue
+
                 messages = await EventBus.read_stream(r, "market:data", "persistence_bridge", "writer_1", count=500, block=5000)
                 for msg in messages:
                     event_type = msg.get("event_type", "unknown")
                     self._events_by_type[event_type] = self._events_by_type.get(event_type, 0) + 1
                     success = await self._persist_with_retry(msg)
                     if success:
+                        if self._circuit_breaker.state.name == "HALF_OPEN":
+                            self._circuit_breaker.record_success()
                         await EventBus.ack_message(r, "market:data", "persistence_bridge", msg["id"])
                         self._processed += 1
+                    else:
+                        self._circuit_breaker.record_failure()
             except asyncio.CancelledError:
                 break
             except Exception as e:
@@ -87,10 +193,15 @@ class EventPersistenceBridge:
     # ── Retry + persist ──────────────────────────────────────
 
     async def _persist_with_retry(self, msg: dict, max_retries: int = 3) -> bool:
+        from app.core.system_mode import get_mode_manager
+        if not get_mode_manager().can_write():
+            return False
+
         last_error = None
         for attempt in range(max_retries + 1):
             try:
-                await self._persist_normalized_event(msg)
+                async with self._persist_semaphore:
+                    await self._persist_normalized_event(msg)
                 return True
             except Exception as e:
                 last_error = e
@@ -99,6 +210,7 @@ class EventPersistenceBridge:
                     logger.debug("persist_retry", event_type=msg.get("event_type"), attempt=attempt + 1, error=str(e))
                     await asyncio.sleep(0.5 * (attempt + 1))
         self._failed_count += 1
+        self._circuit_breaker.record_failure()
         logger.error("persist_failed_all_retries", event_type=msg.get("event_type"), error=str(last_error))
         event_type = msg.get("event_type", "unknown")
         self._dropped_by_type[event_type] = self._dropped_by_type.get(event_type, 0) + 1
@@ -113,9 +225,8 @@ class EventPersistenceBridge:
             return
         event_type = msg.get("event_type", "unknown")
 
-        # Bridge-level duplicate check
         event_hash = self._compute_event_hash(msg)
-        if self._is_duplicate(event_hash):
+        if await self._is_duplicate(event_hash):
             self._dropped_by_type[event_type] = self._dropped_by_type.get(event_type, 0) + 1
             return
 
@@ -144,15 +255,23 @@ class EventPersistenceBridge:
         )
         return hashlib.sha256("|".join(raw).encode()).hexdigest()
 
-    def _is_duplicate(self, event_hash: str) -> bool:
+    async def _is_duplicate(self, event_hash: str) -> bool:
         if event_hash in self._recent_hashes:
             self._duplicate_events_detected += 1
             return True
+        if settings.DEDUP_REDIS_ENABLED:
+            redis_dup = await is_duplicate_event(event_hash)
+            if redis_dup:
+                self._redis_dedup_hits += 1
+                self._duplicate_events_detected += 1
+                return True
+            self._redis_dedup_skipped += 1
         self._recent_hashes.add(event_hash)
         self._recent_hash_order.append(event_hash)
         if len(self._recent_hash_order) > self._max_hash_cache:
             old = self._recent_hash_order.pop(0)
             self._recent_hashes.discard(old)
+        await mark_event_processed(event_hash)
         return False
 
     # ── Persisters ───────────────────────────────────────────
@@ -275,6 +394,7 @@ class EventPersistenceBridge:
         self._dlq.append(entry)
         if len(self._dlq) > 1000:
             self._dlq = self._dlq[-500:]
+        dlq_size.labels(origin_stream="market:data").set(len(self._dlq))
         try:
             from app.redis import get_redis
             r = await get_redis()
@@ -282,12 +402,88 @@ class EventPersistenceBridge:
         except Exception as e:
             logger.error("dlq_publish_failed", event_type=event_type, error=str(e))
 
+    async def replay_dlq(self, max_entries: int = 100) -> dict:
+        replayed = 0
+        failed = 0
+        skipped = 0
+        dlq_size.labels(origin_stream="market:data").set(len(self._dlq))
+        try:
+            from app.redis import get_redis
+            r = await get_redis()
+            dlq_entries = await r.xrevrange("market:data:dlq", count=max_entries)
+            for msg_id, raw in dlq_entries:
+                if isinstance(raw, list):
+                    raw = dict(raw)
+                event_type = raw.get("event_type", "unknown")
+                data_raw = raw.get("data", {})
+                if isinstance(data_raw, str):
+                    try:
+                        import json
+                        data_raw = json.loads(data_raw)
+                    except Exception:
+                        data_raw = {}
+                try:
+                    entry = raw.get("data", data_raw) if isinstance(raw.get("data"), dict) else data_raw
+                    event_type_from_data = entry.get("event_type") if isinstance(entry, dict) else event_type
+                    msg = {
+                        "event_type": event_type_from_data or event_type,
+                        "data": entry if isinstance(entry, dict) else {},
+                    }
+                    success = await self._persist_with_retry(msg)
+                    if success:
+                        await r.xack("market:data:dlq", "persistence_bridge", msg_id) if False else None
+                        await r.xdel("market:data:dlq", msg_id)
+                        replayed += 1
+                        self._dlq_replayed += 1
+                        dlq_replay_success_total.labels(origin_stream="market:data").inc()
+                    else:
+                        failed += 1
+                        self._dlq_replay_failures += 1
+                        dlq_replay_failures_total.labels(origin_stream="market:data").inc()
+                        logger.warning("dlq_replay_failed", msg_id=msg_id, event_type=event_type)
+                except Exception as e:
+                    failed += 1
+                    logger.error("dlq_replay_error", msg_id=msg_id, error=str(e))
+        except Exception as e:
+            logger.error("dlq_replay_cycle_error", error=str(e))
+        return {"replayed": replayed, "failed": failed, "skipped": skipped}
+
+    async def _dlq_replay_loop(self):
+        await asyncio.sleep(settings.DLQ_REPLAY_INTERVAL)
+        backoff = settings.DLQ_REPLAY_BACKOFF_BASE
+        failures = 0
+        while self.running:
+            try:
+                result = await self.replay_dlq(max_entries=settings.DLQ_REPLAY_MAX_ENTRIES)
+                if result["replayed"] > 0 or result["failed"] > 0:
+                    logger.info("dlq_replay_cycle", **result)
+                if result["failed"] > 0:
+                    failures += 1
+                    backoff = min(backoff * 1.5, 3600)
+                else:
+                    failures = 0
+                    backoff = settings.DLQ_REPLAY_BACKOFF_BASE
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                logger.error("dlq_replay_loop_error", error=str(e))
+            await asyncio.sleep(backoff)
+
     # ── Stats ────────────────────────────────────────────────
+
+    @property
+    def circuit_breaker_state(self) -> dict:
+        return {
+            "state": self._circuit_breaker.state.name,
+            "total_opens": self._circuit_breaker.total_opens,
+            "failure_rate": round(self._circuit_breaker.failure_rate, 4),
+        }
 
     @property
     def stats(self):
         return {
             "events_processed": self._processed,
+            "circuit_breaker": self.circuit_breaker_state,
             "persisted_count": self._persisted_count,
             "failed_count": self._failed_count,
             "retry_count": self._retry_count,
@@ -296,7 +492,27 @@ class EventPersistenceBridge:
             "persisted_by_type": dict(self._persisted_by_type),
             "dropped_by_type": dict(self._dropped_by_type),
             "duplicate_events_detected": self._duplicate_events_detected,
+            "redis_dedup_hits": self._redis_dedup_hits,
+            "redis_dedup_skipped": self._redis_dedup_skipped,
+            "dlq_replayed": self._dlq_replayed,
+            "dlq_replay_failures": self._dlq_replay_failures,
+            "pending_claimed": self._pending_claimed,
+            "pending_dlq_transferred": self._pending_dlq_transferred,
         }
+
+    async def get_dlq(self) -> list[dict]:
+        return list(self._dlq)
+
+    async def clear_dlq(self) -> int:
+        count = len(self._dlq)
+        self._dlq.clear()
+        try:
+            from app.redis import get_redis
+            r = await get_redis()
+            await r.delete("market:data:dlq")
+        except Exception as e:
+            logger.error("dlq_clear_failed", error=str(e))
+        return count
 
 
 # ── Helpers ──────────────────────────────────────────────────

@@ -1,6 +1,7 @@
 import asyncio
 import hashlib
 import json
+import uuid
 from datetime import datetime, timezone
 from typing import Any
 
@@ -8,6 +9,8 @@ import websockets
 
 from app.config import settings
 from app.core.logging import logger
+from app.core.dedup import is_duplicate_event, mark_event_processed
+from app.core.timing import timed
 from app.ingesters.base import BaseIngester
 from app.core.events import EventBus
 from app.database import async_session_factory
@@ -30,6 +33,8 @@ class PolymarketWSIngester(BaseIngester):
         self._messages_received = 0
         self._last_message_time: datetime | None = None
         self._reconnect_count = 0
+        self._stall_count = 0
+        self._stall_reconnects = 0
         self._subscribed_assets: list[str] = []
 
         self._asset_to_condition: dict[str, str] = {}
@@ -42,11 +47,13 @@ class PolymarketWSIngester(BaseIngester):
         self._unknown_by_type: dict[str, int] = {}
         self._dropped_by_type: dict[str, int] = {}
 
-        # Duplicate detection (in-memory LRU)
+        # Duplicate detection (Redis-backed, L1 in-memory LRU)
         self._recent_hashes: set[str] = set()
         self._recent_hash_order: list[str] = []
         self._max_hash_cache = 1000
         self._duplicate_events_detected = 0
+        self._redis_dedup_hits = 0
+        self._redis_dedup_skipped = 0
 
         # Raw event buffer (last 50)
         self._last_raw_events: list[dict] = []
@@ -147,6 +154,7 @@ class PolymarketWSIngester(BaseIngester):
         self._tasks.append(asyncio.create_task(self._heartbeat()))
         self._tasks.append(asyncio.create_task(self._subscription_refresher()))
         self._tasks.append(asyncio.create_task(self._cleanup_loop()))
+        self._tasks.append(asyncio.create_task(self._stale_watchdog()))
         await self._message_loop()
 
     async def stop(self):
@@ -194,6 +202,35 @@ class PolymarketWSIngester(BaseIngester):
             await asyncio.sleep(300)
             self._prune_stale_traces()
 
+    async def _stale_watchdog(self):
+        await asyncio.sleep(settings.WS_WATCHDOG_INTERVAL)
+        while self.running:
+            try:
+                if self._last_message_time:
+                    elapsed = (datetime.now(timezone.utc) - self._last_message_time).total_seconds()
+                    if elapsed > settings.WS_STALE_TIMEOUT:
+                        self._stall_count += 1
+                        logger.warning(
+                            "ws_stale_detected",
+                            elapsed_seconds=elapsed,
+                            threshold=settings.WS_STALE_TIMEOUT,
+                            stall_count=self._stall_count,
+                        )
+                        if self.ws:
+                            try:
+                                await self.ws.close()
+                            except Exception:
+                                pass
+                            self.ws = None
+                        self._stall_reconnects += 1
+                        self._reconnect_count += 1
+                await asyncio.sleep(settings.WS_WATCHDOG_INTERVAL)
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                logger.error("ws_watchdog_error", error=str(e))
+                await asyncio.sleep(settings.WS_WATCHDOG_INTERVAL)
+
     # ── Validation & dedup ───────────────────────────────────
 
     @staticmethod
@@ -209,15 +246,23 @@ class PolymarketWSIngester(BaseIngester):
         )
         return hashlib.sha256("|".join(raw).encode()).hexdigest()
 
-    def _is_duplicate(self, event_hash: str) -> bool:
+    async def _is_duplicate(self, event_hash: str) -> bool:
         if event_hash in self._recent_hashes:
             self._duplicate_events_detected += 1
             return True
+        if settings.DEDUP_REDIS_ENABLED:
+            redis_dup = await is_duplicate_event(event_hash)
+            if redis_dup:
+                self._redis_dedup_hits += 1
+                self._duplicate_events_detected += 1
+                return True
+            self._redis_dedup_skipped += 1
         self._recent_hashes.add(event_hash)
         self._recent_hash_order.append(event_hash)
         if len(self._recent_hash_order) > self._max_hash_cache:
             old = self._recent_hash_order.pop(0)
             self._recent_hashes.discard(old)
+        await mark_event_processed(event_hash)
         return False
 
     @staticmethod
@@ -297,7 +342,7 @@ class PolymarketWSIngester(BaseIngester):
 
     # ── Publish normalized event with full validation ────────
 
-    async def _publish_normalized(self, normalized: dict, event_type: str):
+    async def _publish_normalized(self, normalized: dict, event_type: str, correlation_id: str | None = None):
         valid, reason = self._validate_normalized(normalized)
         if not valid:
             self._validation_failures += 1
@@ -306,20 +351,22 @@ class PolymarketWSIngester(BaseIngester):
             return
 
         event_hash = self._compute_event_hash(normalized)
-        if self._is_duplicate(event_hash):
+        if await self._is_duplicate(event_hash):
             self._dropped_by_type[event_type] = self._dropped_by_type.get(event_type, 0) + 1
             self._store_raw_event(normalized, event_type, False, f"duplicate_hash:{event_hash[:12]}")
             return
 
-        trace_id = f"{event_type}_{datetime.now(timezone.utc).timestamp()}"
+        ingest_ts = datetime.now(timezone.utc)
+        trace_id = f"{event_type}_{ingest_ts.timestamp()}"
         normalized["_trace_id"] = trace_id
-        normalized["_normalized_at"] = datetime.now(timezone.utc).isoformat()
+        normalized["_normalized_at"] = ingest_ts.isoformat()
+        normalized["_ingest_timestamp"] = ingest_ts.isoformat()
         self._live_traces[trace_id] = normalized
         if len(self._live_traces) > self._max_live_traces:
             self._prune_stale_traces()
 
         try:
-            await EventBus.publish("market:data", event_type, self.name, normalized)
+            await EventBus.publish("market:data", event_type, self.name, normalized, correlation_id=correlation_id)
             self._normalized_events_published += 1
             self._normalized_by_type[event_type] = self._normalized_by_type.get(event_type, 0) + 1
         except Exception as e:
@@ -361,6 +408,7 @@ class PolymarketWSIngester(BaseIngester):
                 self._last_message_time = datetime.now(timezone.utc)
                 data = json.loads(message)
 
+                correlation_id = str(uuid.uuid4())
                 event_type = data.get("type") or data.get("event_type") or data.get("channel") or "unknown"
                 self._events_by_type[event_type] = self._events_by_type.get(event_type, 0) + 1
 
@@ -372,24 +420,24 @@ class PolymarketWSIngester(BaseIngester):
                     self._store_raw_event(data, event_type, True, "parsed as trade")
                     normalized = self._normalize_trade_event(data, event_type)
                     if normalized:
-                        await self._publish_normalized(normalized, "trade")
+                        await self._publish_normalized(normalized, "trade", correlation_id=correlation_id)
                     else:
                         self._parse_failures += 1
                         self._store_raw_event(data, event_type, False, "normalization_failed")
-                        await EventBus.publish("market:data", "trade", self.name, data)
+                        await EventBus.publish("market:data", "trade", self.name, data, correlation_id=correlation_id)
 
                 elif event_type == "price_change":
                     self._parsed_events += 1
                     self._store_raw_event(data, event_type, True, "parsed as price_change")
                     normalized_list = self._normalize_price_events(data)
                     for normalized in normalized_list:
-                        await self._publish_normalized(normalized, "price_change")
+                        await self._publish_normalized(normalized, "price_change", correlation_id=correlation_id)
                     if not normalized_list:
                         self._store_raw_event(data, event_type, False, "price_change_empty_or_bad_structure")
 
                 elif event_type == "book":
                     self._store_raw_event(data, event_type, True, "parsed as orderbook")
-                    await EventBus.publish("market:data", "orderbook_snapshot", self.name, data)
+                    await EventBus.publish("market:data", "orderbook_snapshot", self.name, data, correlation_id=correlation_id)
 
                 elif event_type in ("subscription", "subscribe", "ack", "error"):
                     self._store_raw_event(data, event_type, True, f"system_message:{event_type}")
@@ -398,7 +446,7 @@ class PolymarketWSIngester(BaseIngester):
                 else:
                     self._store_raw_event(data, event_type, True, "unhandled_type")
                     self._unknown_by_type[event_type] = self._unknown_by_type.get(event_type, 0) + 1
-                    await EventBus.publish("market:data", event_type, self.name, data)
+                    await EventBus.publish("market:data", event_type, self.name, data, correlation_id=correlation_id)
 
             except websockets.ConnectionClosed:
                 self._reconnect_count += 1
@@ -443,6 +491,8 @@ class PolymarketWSIngester(BaseIngester):
             "messages_received": self._messages_received,
             "last_message_time": self._last_message_time.isoformat() if self._last_message_time else None,
             "reconnect_count": self._reconnect_count,
+            "stall_count": self._stall_count,
+            "stall_reconnects": self._stall_reconnects,
             "event_type_counts": dict(self._events_by_type),
             "parsed_events": self._parsed_events,
             "parse_failures": self._parse_failures,
@@ -464,6 +514,8 @@ class PolymarketWSIngester(BaseIngester):
                 "dropped_by_type": dict(self._dropped_by_type),
                 "validation_failures": self._validation_failures,
                 "duplicate_events_detected": self._duplicate_events_detected,
+                "redis_dedup_hits": self._redis_dedup_hits,
+                "redis_dedup_skipped": self._redis_dedup_skipped,
             },
             "recent_events_sample": self._last_raw_events[-5:] if self._last_raw_events else [],
             "trace_count": len(self._live_traces),

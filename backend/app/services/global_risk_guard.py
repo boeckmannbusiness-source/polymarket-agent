@@ -7,14 +7,58 @@ from sqlalchemy import select, func, and_
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
+from app.core.logging import logger
 from app.models import Trade
 from app.services.pipeline_metrics import inc_exposure_rejection
 
 
-MAX_TOTAL_EXPOSURE_USD = 20
-MAX_POSITION_SIZE_USD = 2
+MAX_TOTAL_EXPOSURE_PCT = 0.02
+MAX_POSITION_SIZE_PCT = 0.002
+MAX_MARKET_EXPOSURE_PCT = 0.005
 MAX_OPEN_POSITIONS = 3
-MAX_MARKET_EXPOSURE_USD = 5
+
+_MAX_TOTAL_EXPOSURE_ABS_FALLBACK = 20
+_MAX_POSITION_SIZE_ABS_FALLBACK = 2
+_MAX_MARKET_EXPOSURE_ABS_FALLBACK = 5
+
+
+def _get_capital() -> float:
+    return float(settings.PAPER_INITIAL_CAPITAL)
+
+
+def _compute_effective_limits(capital: float | None = None) -> dict[str, float]:
+    cap = capital if capital is not None and capital > 0 else _get_capital()
+    total_pct = float(getattr(settings, "MAX_TOTAL_EXPOSURE_PCT", MAX_TOTAL_EXPOSURE_PCT))
+    pos_pct = float(getattr(settings, "MAX_POSITION_SIZE_PCT", MAX_POSITION_SIZE_PCT))
+    mkt_pct = float(getattr(settings, "MAX_MARKET_EXPOSURE_PCT", MAX_MARKET_EXPOSURE_PCT))
+    total = cap * total_pct
+    pos = cap * pos_pct
+    mkt = cap * mkt_pct
+    if total < _MAX_TOTAL_EXPOSURE_ABS_FALLBACK:
+        total = _MAX_TOTAL_EXPOSURE_ABS_FALLBACK
+    if pos < _MAX_POSITION_SIZE_ABS_FALLBACK:
+        pos = _MAX_POSITION_SIZE_ABS_FALLBACK
+    if mkt < _MAX_MARKET_EXPOSURE_ABS_FALLBACK:
+        mkt = _MAX_MARKET_EXPOSURE_ABS_FALLBACK
+    return {"total_exposure": total, "position_size": pos, "market_exposure": mkt}
+
+
+_effective_limits_logged = False
+
+
+def _log_effective_limits():
+    global _effective_limits_logged
+    if not _effective_limits_logged:
+        limits = _compute_effective_limits()
+        logger.info(
+            "global_risk_guard_effective_limits",
+            capital=_get_capital(),
+            total_exposure_pct=MAX_TOTAL_EXPOSURE_PCT,
+            position_size_pct=MAX_POSITION_SIZE_PCT,
+            market_exposure_pct=MAX_MARKET_EXPOSURE_PCT,
+            **limits,
+        )
+        _effective_limits_logged = True
 
 
 @dataclass
@@ -30,6 +74,7 @@ class ExposureCheckResult:
 class GlobalRiskGuard:
     def __init__(self, db: AsyncSession):
         self.db = db
+        _log_effective_limits()
 
     async def check_exposure(
         self,
@@ -38,6 +83,7 @@ class GlobalRiskGuard:
         proposed_size: float,
         proposed_price: float,
     ) -> ExposureCheckResult:
+        limits = _compute_effective_limits()
         result = await self.db.execute(
             select(Trade).where(
                 Trade.status.in_(["open", "pending"]),
@@ -60,22 +106,22 @@ class GlobalRiskGuard:
         pending_exposure = proposed_size * proposed_price
         total_exposure = current_open_exposure + pending_exposure
 
-        if total_exposure > MAX_TOTAL_EXPOSURE_USD:
+        if total_exposure > limits["total_exposure"]:
             await inc_exposure_rejection()
             return ExposureCheckResult(
                 approved=False,
-                reason=f"total_exposure_{total_exposure:.2f}_exceeds_max_{MAX_TOTAL_EXPOSURE_USD}",
+                reason=f"total_exposure_{total_exposure:.2f}_exceeds_max_{limits['total_exposure']:.2f}",
                 current_open_exposure=current_open_exposure,
                 pending_exposure=pending_exposure,
                 exposure_by_market=exposure_by_market,
                 position_count=position_count,
             )
 
-        if proposed_size * proposed_price > MAX_POSITION_SIZE_USD:
+        if proposed_size * proposed_price > limits["position_size"]:
             await inc_exposure_rejection()
             return ExposureCheckResult(
                 approved=False,
-                reason=f"position_size_{proposed_size*proposed_price:.2f}_exceeds_max_{MAX_POSITION_SIZE_USD}",
+                reason=f"position_size_{proposed_size*proposed_price:.2f}_exceeds_max_{limits['position_size']:.2f}",
                 current_open_exposure=current_open_exposure,
                 pending_exposure=pending_exposure,
                 exposure_by_market=exposure_by_market,
@@ -94,11 +140,11 @@ class GlobalRiskGuard:
             )
 
         market_exposure = exposure_by_market.get(market_id, 0) + pending_exposure
-        if market_exposure > MAX_MARKET_EXPOSURE_USD:
+        if market_exposure > limits["market_exposure"]:
             await inc_exposure_rejection()
             return ExposureCheckResult(
                 approved=False,
-                reason=f"market_exposure_{market_exposure:.2f}_exceeds_max_{MAX_MARKET_EXPOSURE_USD}",
+                reason=f"market_exposure_{market_exposure:.2f}_exceeds_max_{limits['market_exposure']:.2f}",
                 current_open_exposure=current_open_exposure,
                 pending_exposure=pending_exposure,
                 exposure_by_market=exposure_by_market,
@@ -115,6 +161,7 @@ class GlobalRiskGuard:
         )
 
     async def get_exposure_summary(self) -> dict[str, Any]:
+        limits = _compute_effective_limits()
         result = await self.db.execute(
             select(Trade).where(
                 Trade.status.in_(["open", "pending"]),
@@ -135,11 +182,11 @@ class GlobalRiskGuard:
 
         return {
             "total_open_exposure": round(total_exposure, 2),
-            "max_total_exposure": MAX_TOTAL_EXPOSURE_USD,
-            "exposure_utilization_pct": round(total_exposure / MAX_TOTAL_EXPOSURE_USD * 100, 1) if MAX_TOTAL_EXPOSURE_USD > 0 else 0,
+            "max_total_exposure": round(limits["total_exposure"], 2),
+            "exposure_utilization_pct": round(total_exposure / limits["total_exposure"] * 100, 1) if limits["total_exposure"] > 0 else 0,
             "position_count": len(open_trades),
             "max_open_positions": MAX_OPEN_POSITIONS,
-            "max_position_size_usd": MAX_POSITION_SIZE_USD,
-            "max_market_exposure_usd": MAX_MARKET_EXPOSURE_USD,
+            "max_position_size_usd": round(limits["position_size"], 2),
+            "max_market_exposure_usd": round(limits["market_exposure"], 2),
             "exposure_by_market": {k: round(v, 2) for k, v in exposure_by_market.items()},
         }

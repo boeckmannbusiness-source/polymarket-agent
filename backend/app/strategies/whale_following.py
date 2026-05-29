@@ -1,6 +1,12 @@
+from decimal import Decimal
+
 from app.strategies.base import BaseStrategy, StrategyConfig
 from app.strategies.signal import StructuredSignal
+from app.core.logging import logger
 from pydantic import Field
+
+
+_WHALE_FOLLOWING_VALID_OUTCOMES = {"YES", "NO"}
 
 
 class WhaleFollowingConfig(StrategyConfig):
@@ -10,9 +16,29 @@ class WhaleFollowingConfig(StrategyConfig):
     recency_bias_hours: int = Field(default=48, ge=1)
 
 
+def _derive_whale_direction(side: str, outcome: str | None) -> str | None:
+    side_norm = side.upper().strip()
+    outcome_norm = outcome.upper().strip() if outcome else None
+
+    if outcome_norm not in _WHALE_FOLLOWING_VALID_OUTCOMES:
+        logger.warning("whale_following_invalid_outcome", side=side, outcome=outcome)
+        return None
+
+    is_buy = side_norm in ("BUY", "YES")
+    is_no = outcome_norm == "NO"
+
+    if is_buy and not is_no:
+        return "BUY_YES"
+    if not is_buy and is_no:
+        return "BUY_YES"
+    if not is_buy and not is_no:
+        return "BUY_NO"
+    return "BUY_NO"
+
+
 class WhaleFollowingStrategy(BaseStrategy):
     name = "whale_following"
-    version = "1.0.0"
+    version = "2.0.0"
     description = "Follows large trades from historically profitable wallets"
 
     def __init__(self, config: dict | None = None):
@@ -23,6 +49,7 @@ class WhaleFollowingStrategy(BaseStrategy):
         wallet = market_state.get("wallet", "")
         size = float(market_state.get("size", 0) or 0)
         side = market_state.get("side", "buy")
+        outcome = market_state.get("outcome", "YES")
         wallet_score = market_state.get("wallet_score")
 
         if not self.cfg.min_trade_size <= size <= self.cfg.max_trade_size:
@@ -31,7 +58,9 @@ class WhaleFollowingStrategy(BaseStrategy):
         if wallet_score and wallet_score < self.cfg.min_whale_win_rate:
             return None
 
-        direction = "BUY_YES" if side.upper() in ("BUY", "YES") else "BUY_NO"
+        direction = _derive_whale_direction(side, outcome)
+        if direction is None:
+            return None
         size_ratio = min(size / 10_000, 1.0)
         confidence = 0.5 + (size_ratio * 0.3)
         if wallet_score:

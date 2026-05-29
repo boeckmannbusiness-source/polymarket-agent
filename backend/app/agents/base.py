@@ -57,8 +57,8 @@ class BaseAgent(ABC):
                 {"agent": self.name, "status": "running"},
             )
 
-    async def log_event(self, event_type: str, data: dict | None = None):
-        await EventBus.publish("agent:event", event_type, self.name, data or {})
+    async def log_event(self, event_type: str, data: dict | None = None, correlation_id: str | None = None):
+        await EventBus.publish("agent:event", event_type, self.name, data or {}, correlation_id=correlation_id)
         logger.info("agent_event", agent=self.name, event_type=event_type)
 
     async def run_forever(self):

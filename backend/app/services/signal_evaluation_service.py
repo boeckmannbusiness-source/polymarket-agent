@@ -1,10 +1,12 @@
 from __future__ import annotations
 from datetime import datetime, timedelta, timezone
+from decimal import Decimal
 from typing import TYPE_CHECKING
 
 from sqlalchemy import select, desc, and_
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.logging import logger
 from app.models import Signal, MarketEvent, SignalOutcome
 
 if TYPE_CHECKING:
@@ -59,6 +61,29 @@ class SignalEvaluationService:
         await self.db.flush()
         return outcome
 
+    async def _get_entry_price(self, signal: Signal, entry_ts: datetime) -> Decimal | None:
+        from app.services.price_utils import get_outcome_specific_price
+
+        result = await get_outcome_specific_price(
+            self.db, signal.market_id, entry_ts, signal.direction or "BUY_YES"
+        )
+        if result is not None:
+            return result
+
+        entry_price_result = await self.db.execute(
+            select(MarketEvent.price)
+            .where(
+                MarketEvent.market_id == signal.market_id,
+                MarketEvent.timestamp <= entry_ts,
+            )
+            .order_by(desc(MarketEvent.timestamp))
+            .limit(1)
+        )
+        entry_price_row = entry_price_result.one_or_none()
+        if entry_price_row and entry_price_row[0] is not None:
+            return Decimal(str(entry_price_row[0]))
+        return None
+
     async def evaluate_signal(self, signal: Signal) -> SignalOutcome | None:
         if signal.generated_at is None or signal.market_id is None:
             return None
@@ -78,17 +103,19 @@ class SignalEvaluationService:
 
         entry_ts = signal.generated_at.replace(tzinfo=timezone.utc) if signal.generated_at.tzinfo is None else signal.generated_at
 
-        entry_price_result = await self.db.execute(
-            select(MarketEvent.price)
-            .where(
-                MarketEvent.market_id == signal.market_id,
-                MarketEvent.timestamp <= entry_ts,
+        entry_price_dec = await self._get_entry_price(signal, entry_ts)
+        if entry_price_dec is None:
+            from app.services.pipeline_metrics import inc_signal_eval_missing_entry_price
+            await inc_signal_eval_missing_entry_price()
+            logger.warning(
+                "signal_eval_missing_entry_price",
+                signal_id=str(signal.id),
+                strategy=signal.signal_type,
+                market_id=str(signal.market_id),
             )
-            .order_by(desc(MarketEvent.timestamp))
-            .limit(1)
-        )
-        entry_price_row = entry_price_result.one_or_none()
-        entry_price = float(entry_price_row[0]) if entry_price_row else float(signal.confidence)
+            return None
+
+        entry_price = float(entry_price_dec)
 
         checkpoints = {
             "5m": entry_ts + timedelta(minutes=5),
@@ -106,8 +133,20 @@ class SignalEvaluationService:
             price = float(event.price) if event.price else None
             if price is None:
                 continue
+            event_outcome = event.outcome.upper() if event.outcome else None
+            event_price = float(event.price)
+            if signal.direction in ("bullish", "BUY_YES"):
+                resolved_price = event_price if event_outcome == "YES" else (
+                    1.0 - event_price if event_outcome == "NO" else event_price
+                )
+            elif signal.direction in ("bearish", "BUY_NO"):
+                resolved_price = event_price if event_outcome == "NO" else (
+                    1.0 - event_price if event_outcome == "YES" else event_price
+                )
+            else:
+                resolved_price = event_price
 
-            movement = price - entry_price
+            movement = resolved_price - entry_price
             if signal.direction in ("bullish", "BUY_YES"):
                 price_direction = movement
             elif signal.direction in ("bearish", "BUY_NO"):
@@ -133,7 +172,7 @@ class SignalEvaluationService:
                     loss = price_direction < -0.001 * entry_price
                     results[label] = {
                         "outcome": "WIN" if win else "LOSS" if loss else "FLAT",
-                        "probability": price,
+                        "probability": resolved_price,
                         "pnl": price_direction,
                     }
 

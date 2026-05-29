@@ -27,6 +27,8 @@ _duplicate_market_rejections_total = 0
 _trading_halt_count = 0
 _halt_reason = ""
 _kill_switch_activations_total = 0
+_signal_eval_missing_entry_price_total = 0
+_pending_trade_timeout_total = 0
 _start_time = time.time()
 _lock = Lock()
 
@@ -136,6 +138,18 @@ async def inc_kill_switch_activation():
         _kill_switch_activations_total += 1
 
 
+async def inc_signal_eval_missing_entry_price():
+    global _signal_eval_missing_entry_price_total
+    async with _lock:
+        _signal_eval_missing_entry_price_total += 1
+
+
+async def inc_pending_trade_timeout():
+    global _pending_trade_timeout_total
+    async with _lock:
+        _pending_trade_timeout_total += 1
+
+
 async def get_metrics() -> dict:
     global _signal_count, _risk_rejected_count, _execution_success_count
     global _execution_failure_count, _total_slippage, _total_executions
@@ -145,6 +159,7 @@ async def get_metrics() -> dict:
     global _exposure_rejections_total, _total_open_exposure, _exposure_utilization_pct
     global _duplicate_market_rejections_total, _trading_halt_count, _halt_reason
     global _kill_switch_activations_total, _start_time
+    global _signal_eval_missing_entry_price_total, _pending_trade_timeout_total
     async with _lock:
         elapsed = time.time() - _start_time
         elapsed_min = max(elapsed / 60, 1)
@@ -183,5 +198,7 @@ async def get_metrics() -> dict:
             "trading_halt_count": _trading_halt_count,
             "halt_reason": _halt_reason,
             "kill_switch_activations_total": _kill_switch_activations_total,
+            "signal_eval_missing_entry_price_total": _signal_eval_missing_entry_price_total,
+            "pending_trade_timeout_total": _pending_trade_timeout_total,
             "uptime_seconds": round(elapsed, 1),
         }

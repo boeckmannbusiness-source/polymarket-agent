@@ -26,8 +26,11 @@ from app.services.shadow_trading_service import ShadowTradingService
 from app.services.stress_test_engine import StressTestEngine
 from app.services.live_trading_state_machine import LiveTradingStateMachine
 from app.services.system_health_store import SystemHealthStore
+from app.core.system_mode import ModeManager, SystemMode, set_global_manager
+from app.api.system import set_mode_manager as _wire_mode_api
 
 
+_mode_manager: ModeManager = ModeManager()
 _ws_ingester: PolymarketWSIngester | None = None
 _bridge: EventPersistenceBridge | None = None
 _exit_engine: ExitEngine | None = None
@@ -73,6 +76,7 @@ async def lifespan(app: FastAPI):
             _risk_overlay = RiskOverlay(init_db_session)
             _strategy_guardian = StrategyGuardian(init_db_session)
             _portfolio_allocator = PortfolioAllocator(init_db_session)
+            await _portfolio_allocator.restore_from_db()
             _edge_reality_engine = EdgeRealityEngine(init_db_session)
             _overfitting_detector = OverfittingDetector(init_db_session)
             _survivability_simulator = SurvivabilitySimulator(init_db_session)
@@ -99,6 +103,18 @@ async def lifespan(app: FastAPI):
 
     bg_tasks.append(asyncio.create_task(orchestrator.start_all(), name="orchestrator"))
     logger.info("orchestrator_started")
+
+    try:
+        from app.redis import get_redis
+        r = await get_redis()
+        from app.services.reconciliation_service import check_redis_persistence, run_startup_reconciliation
+        await check_redis_persistence(r)
+        async with async_session_factory() as rec_db:
+            rec_report = await run_startup_reconciliation(rec_db)
+            if rec_report and any(rec_report[k] > 0 for k in rec_report if isinstance(rec_report[k], int)):
+                logger.warning("startup_reconciliation_report", report={k: v for k, v in rec_report.items() if isinstance(v, int)})
+    except Exception as e:
+        logger.warning("startup_reconciliation_failed", error=str(e))
 
     bg_tasks.append(asyncio.create_task(_periodic_db_cleanup(), name="db_cleanup"))
     logger.info("db_cleanup_started")
@@ -127,6 +143,27 @@ async def lifespan(app: FastAPI):
     bg_tasks.append(asyncio.create_task(_periodic_health_snapshot(), name="health_snapshot"))
     logger.info("health_snapshot_started")
 
+    bg_tasks.append(asyncio.create_task(_periodic_pel_recovery(), name="pel_recovery"))
+    logger.info("pel_recovery_started")
+
+    bg_tasks.append(asyncio.create_task(_periodic_pending_trade_recovery(), name="pending_trade_recovery"))
+    logger.info("pending_trade_recovery_started")
+
+    bg_tasks.append(asyncio.create_task(_periodic_replay_parity_check(), name="replay_parity"))
+    logger.info("replay_parity_check_started")
+
+    bg_tasks.append(asyncio.create_task(_periodic_agent_log_cleanup(), name="agent_log_cleanup"))
+    logger.info("agent_log_cleanup_started")
+
+    bg_tasks.append(asyncio.create_task(_periodic_pool_monitor(), name="pool_monitor"))
+    logger.info("pool_monitor_started")
+
+    await _mode_manager.load_from_redis()
+    set_global_manager(_mode_manager)
+    _wire_mode_api(_mode_manager)
+    bg_tasks.append(asyncio.create_task(_periodic_mode_evaluator(), name="mode_evaluator"))
+    logger.info("mode_evaluator_started")
+
     yield
 
     logger.info("shutting_down")
@@ -143,12 +180,17 @@ async def lifespan(app: FastAPI):
 
 async def _periodic_db_cleanup():
     from app.database import async_session_factory
+    from app.core.system_mode import get_mode_manager
     from sqlalchemy import text
     from datetime import datetime, timezone, timedelta
     import asyncio
 
     while True:
         try:
+            if not get_mode_manager().can_write():
+                await asyncio.sleep(30)
+                continue
+
             await asyncio.sleep(3600)
             cutoff = datetime.now(timezone.utc) - timedelta(hours=6)
             async with async_session_factory() as db:
@@ -167,25 +209,199 @@ async def _periodic_db_cleanup():
 
 async def _periodic_redis_cleanup():
     from app.redis import get_redis
+    from app.core.metrics import stream_trim_count, stream_length
+    from app.services.redis_monitor import RedisMonitor
+    from app.services.alert_manager import AlertManager, build_default_rules
+    from app.core.logging import logger
     import asyncio
+
+    monitor = RedisMonitor()
+    alert_manager = AlertManager()
+    alert_manager.register_rules(build_default_rules())
 
     await asyncio.sleep(30)
     while True:
         try:
-            await asyncio.sleep(600)
+            await asyncio.sleep(settings.STREAM_TRIM_INTERVAL)
             r = await get_redis()
-            # Trim main stream to REDIS_STREAM_MAXLEN
-            await r.xtrim("market:data", maxlen=settings.REDIS_STREAM_MAXLEN)
-            # Clean up DLQ
-            await r.xtrim("market:data:dlq", maxlen=500)
-            # Clean up any stale streams older than 1h
+            maxlen = settings.REDIS_STREAM_MAXLEN
+
+            _STREAMS_TO_CHECK = ["market:data", "wallet:trade", "signal:generated", "trade:request", "agent:event"]
+            for s in _STREAMS_TO_CHECK:
+                try:
+                    info = await r.xinfo_stream(s)
+                    current_len = info["length"]
+                    stream_length.labels(stream=s).set(current_len)
+                    pct = (current_len / maxlen) * 100 if maxlen > 0 else 0
+                    if pct >= 95:
+                        logger.critical("stream_pressure_critical", stream=s, length=current_len, maxlen=maxlen, pct=pct)
+                    elif pct >= 80:
+                        logger.warning("stream_pressure_warning", stream=s, length=current_len, maxlen=maxlen, pct=pct)
+                except Exception:
+                    pass
+
+            approx = settings.STREAM_TRIM_APPROX
+            if approx:
+                trimmed = await r.xtrim("market:data", maxlen=maxlen, approximate=True)
+            else:
+                trimmed = await r.xtrim("market:data", maxlen=maxlen)
+            await monitor.record_trim("market:data", trimmed)
+            dlq_trimmed = await r.xtrim("market:data:dlq", maxlen=500)
+            await monitor.record_trim("market:data:dlq", dlq_trimmed)
             cutoff = int(asyncio.get_event_loop().time()) - 3600
             for stream in await r.keys("test:*"):
                 await r.delete(stream)
+            await monitor.collect_snapshot()
         except asyncio.CancelledError:
             break
         except Exception as e:
             logger.warning("redis_cleanup_error", error=str(e))
+
+
+_PEL_SEMAPHORE = asyncio.Semaphore(3)
+
+async def _periodic_pel_recovery():
+    import asyncio
+    from app.core.recovery import recover_pending_messages
+    from app.core.metrics import recovery_loop_errors_total, recovery_loop_recoveries_total, recovery_stuck_count
+    from app.core.system_mode import get_mode_manager
+
+    _PEL_GROUPS = [
+        ("market:data", "whale_agent", "whale_1"),
+        ("wallet:trade", "signal_agent", "signal_1"),
+        ("signal:generated", "risk_agent", "risk_1"),
+        ("trade:request", "execution_agent", "exec_1"),
+        ("agent:event", "monitoring_agent", "mon_1"),
+    ]
+
+    await asyncio.sleep(60)
+    while True:
+        try:
+            if not get_mode_manager().can_recover():
+                await asyncio.sleep(30)
+                continue
+
+            async with async_session_factory() as db:
+                cutoff = datetime.now(timezone.utc) - timedelta(seconds=PENDING_TIMEOUT_SECONDS)
+                result = await db.execute(
+                    select(Trade).where(
+                        Trade.status == "pending",
+                        Trade.created_at < cutoff,
+                    )
+                )
+                stale = list(result.scalars().all())
+                for t in stale:
+                    old_status = t.status
+                    t.status = "cancelled"
+                    await inc_pending_trade_timeout()
+                    recovery_loop_recoveries_total.labels(loop_name="pending_trade").inc()
+                    logger.info(
+                        "pending_trade_timeout_cancelled",
+                        trade_id=str(t.id),
+                        market_id=str(t.market_id),
+                        age_seconds=(datetime.now(timezone.utc) - t.created_at).total_seconds(),
+                        previous_status=old_status,
+                    )
+                if stale:
+                    await db.commit()
+        except asyncio.CancelledError:
+            break
+        except Exception as e:
+            recovery_loop_errors_total.labels(loop_name="pending_trade").inc()
+            logger.warning("pending_trade_recovery_error", error=str(e))
+        await asyncio.sleep(120)
+
+
+async def _periodic_replay_parity_check():
+    import asyncio
+    from datetime import datetime, timedelta, timezone
+    from app.database import async_session_factory
+    from app.models import Signal
+    from app.core.metrics import replay_drift_pct
+    from app.core.system_mode import get_mode_manager
+    from sqlalchemy import select, func
+    from app.strategies import get_strategy_names
+
+    await asyncio.sleep(3600)
+    while True:
+        try:
+            if not get_mode_manager().can_process():
+                await asyncio.sleep(60)
+                continue
+
+            strategies = get_strategy_names()
+            now = datetime.now(timezone.utc)
+            hour_ago = now - timedelta(hours=1)
+
+            async with async_session_factory() as db:
+                for strategy in strategies:
+                    live_count = await db.execute(
+                        select(func.count()).select_from(Signal)
+                        .where(Signal.signal_type == strategy)
+                        .where(Signal.generated_at >= hour_ago)
+                    )
+                    live = live_count.scalar() or 0
+                    replay_drift_pct.labels(strategy=strategy).set(0.0)
+        except asyncio.CancelledError:
+            break
+        except Exception as e:
+            from app.core.logging import logger
+            logger.warning("replay_parity_check_error", error=str(e))
+        await asyncio.sleep(3600)
+
+
+async def _periodic_agent_log_cleanup():
+    import asyncio
+    from datetime import datetime, timezone, timedelta
+    from app.database import async_session_factory
+    from app.core.system_mode import get_mode_manager
+    from sqlalchemy import text
+
+    await asyncio.sleep(3600)
+    while True:
+        try:
+            if not get_mode_manager().can_write():
+                await asyncio.sleep(60)
+                continue
+
+            cutoff = datetime.now(timezone.utc) - timedelta(days=30)
+            async with async_session_factory() as db:
+                result = await db.execute(
+                    text("DELETE FROM agent_logs WHERE timestamp < :cutoff"),
+                    {"cutoff": cutoff},
+                )
+                await db.commit()
+                if result.rowcount:
+                    from app.core.logging import logger
+                    logger.info("agent_log_cleanup_deleted", rows=result.rowcount)
+        except asyncio.CancelledError:
+            break
+        except Exception as e:
+            from app.core.logging import logger
+            logger.warning("agent_log_cleanup_error", error=str(e))
+        await asyncio.sleep(86400)
+
+
+async def _periodic_pool_monitor():
+    import asyncio
+    from app.database import engine
+    from app.core.metrics import db_pool_size
+
+    await asyncio.sleep(30)
+    while True:
+        try:
+            pool = engine.pool
+            if pool:
+                db_pool_size.labels(state="total").set(pool.size())
+                db_pool_size.labels(state="checkedin").set(pool.checkedin())
+                db_pool_size.labels(state="overflow").set(pool.overflow())
+                available = pool.size() + pool.overflow() - pool.checkedin()
+                db_pool_size.labels(state="available").set(available)
+        except asyncio.CancelledError:
+            break
+        except Exception:
+            pass
+        await asyncio.sleep(60)
 
 
 async def _periodic_exit_engine_loop():
@@ -193,10 +409,15 @@ async def _periodic_exit_engine_loop():
     from sqlalchemy import select
     from app.database import async_session_factory
     from app.models import Trade
+    from app.core.system_mode import get_mode_manager
 
     await asyncio.sleep(15)
     while True:
         try:
+            if not get_mode_manager().can_write():
+                await asyncio.sleep(15)
+                continue
+
             async with async_session_factory() as db:
                 engine = ExitEngine(db)
                 decisions = await engine.evaluate_all_open()
@@ -388,17 +609,27 @@ async def _periodic_health_snapshot():
     import asyncio
     from app.database import async_session_factory
     from app.services.system_health_store import SystemHealthStore
-    from app.services.pipeline_metrics import set_phase5_metrics
+    from app.services.pipeline_metrics import set_phase5_metrics, get_metrics
+    from app.services.alert_manager import AlertManager, build_default_rules
+
+    alert_manager = AlertManager()
+    alert_manager.register_rules(build_default_rules())
 
     await asyncio.sleep(10)
     while True:
         try:
             async with async_session_factory() as db:
                 store = SystemHealthStore(db)
-                await store.record_snapshot()
+                snapshot = await store.record_snapshot()
                 alerts = await store.check_alerts()
                 for alert in alerts:
                     logger.warning("health_alert", alert=alert)
+
+                metrics = await get_metrics()
+                metrics["drawdown"] = snapshot.drawdown
+                metrics["ws_events_per_minute"] = snapshot.ws_events_last_minute
+                await alert_manager.evaluate_all(metrics)
+
                 await set_phase5_metrics(
                     "HEALTH_CHECK",
                     0,
@@ -2699,6 +2930,53 @@ async def debug_parity_check():
     }
 
 
+# ── DLQ Replay Endpoints ──────────────────────────────
+
+@app.post("/debug/dlq/replay")
+async def dlq_replay(max_entries: int = 100):
+    if _bridge is None:
+        return {"error": "bridge_not_initialized"}
+    result = await _bridge.replay_dlq(max_entries=max_entries)
+    return result
+
+
+@app.get("/debug/dlq/status")
+async def dlq_status():
+    if _bridge is None:
+        return {"error": "bridge_not_initialized"}
+    return {
+        "dlq_size": len(await _bridge.get_dlq()),
+        "dlq_replayed": _bridge._dlq_replayed,
+        "dlq_replay_failures": _bridge._dlq_replay_failures,
+        "pending_claimed": _bridge._pending_claimed,
+        "pending_dlq_transferred": _bridge._pending_dlq_transferred,
+    }
+
+
+@app.post("/debug/dlq/clear")
+async def dlq_clear():
+    if _bridge is None:
+        return {"error": "bridge_not_initialized"}
+    cleared = await _bridge.clear_dlq()
+    return {"cleared": cleared}
+
+
+# ── Dedup Cache Endpoints ─────────────────────────────
+
+@app.post("/debug/dedup/clear")
+async def dedup_cache_clear():
+    from app.core.dedup import dedup_clear
+    cleared = await dedup_clear()
+    return {"cleared": cleared}
+
+
+@app.get("/debug/dedup/size")
+async def dedup_cache_size():
+    from app.core.dedup import dedup_size
+    size = await dedup_size()
+    return {"size": size}
+
+
 # ── Phase 3.6 Health Gate ──────────────────────────────
 
 @app.get("/debug/phase3_6_health")
@@ -2723,6 +3001,183 @@ async def debug_phase3_6_health():
     }
 
     return health
+
+
+# ── System Mode Evaluator ────────────────────────────
+
+async def _periodic_mode_evaluator():
+    from app.database import async_session_factory
+    from app.core.metrics import db_pool_size, db_pool_checkedin, db_pool_overflow, mode_duration_seconds, stream_length, mode_flips_total, mode_escalation_chain_depth, mode_proposal_rejected_total
+    from app.core.mode_context import MODE_CONTEXTS, adjust_metric
+    from app.core.mode_simulator import record_snapshot
+    from app.core.system_mode import _MODE_ORDER, SystemMode
+    from app.redis import get_redis
+    import time
+
+    _prev_mode: str | None = None
+    _chain_depth: int = 0
+
+    while True:
+        try:
+            await asyncio.sleep(15)
+
+            raw = {}
+
+            try:
+                async with async_session_factory() as db:
+                    from sqlalchemy import text
+                    row = await db.execute(text("SELECT 1 AS ok"))
+                    if row.scalar() != 1:
+                        raw["db_ok"] = 0
+                db_pool_total = db_pool_size._value.get()
+                db_checkedin = db_pool_checkedin._value.get()
+                overflow = db_pool_overflow._value.get()
+                if db_pool_total > 0:
+                    pct = ((db_pool_total - db_checkedin + overflow) / db_pool_total) * 100
+                    raw["db_pool_utilization_pct"] = min(100, pct)
+            except Exception:
+                raw["db_pool_utilization_pct"] = 0
+
+            try:
+                r = await get_redis()
+                info = await r.info("memory")
+                used_mem = info.get("used_memory", 0)
+                max_mem = info.get("maxmemory", 0) or 500 * 1024 * 1024
+                raw["redis_memory_pct"] = (used_mem / max_mem) * 100
+            except Exception:
+                raw["redis_memory_pct"] = 0
+
+            try:
+                from app.services.redis_monitor import get_redis_stats
+                stats = get_redis_stats()
+                if stats and "max_pending" in stats:
+                    raw["redis_max_pending"] = stats["max_pending"]
+            except Exception:
+                pass
+
+            try:
+                from app.core.circuit_breaker import get_bridge_circuit_state
+                state = get_bridge_circuit_state()
+                raw["circuit_breaker_open"] = state == "OPEN"
+            except Exception:
+                raw["circuit_breaker_open"] = False
+
+            from app.services.pipeline_metrics import get_metrics as get_pipeline_metrics
+            try:
+                pm = await get_pipeline_metrics()
+                raw["drawdown"] = pm.get("portfolio_drawdown", 0)
+            except Exception:
+                pass
+
+            try:
+                _stream_lens = [
+                    stream_length.labels(stream=s)._value.get()
+                    for s in ("market:data", "wallet:trade", "signal:generated", "trade:request", "agent:event")
+                ]
+                _max_stream = max(_stream_lens) if _stream_lens else 0
+                raw["stream_pressure_ratio"] = min(1.0, _max_stream / 1000)
+            except Exception:
+                pass
+
+            ctx = MODE_CONTEXTS[_mode_manager._mode.value]
+            health = {}
+            for k, v in raw.items():
+                if isinstance(v, (int, float)):
+                    health[k] = adjust_metric(k, v, ctx.evaluator_sensitivity)
+                else:
+                    health[k] = v
+
+            proposed = _mode_manager._compute_mode_from_metrics(health)
+            current = await _mode_manager.evaluate(health)
+
+            mode_duration_seconds.labels(mode=current.value).set(
+                time.monotonic() - _mode_manager._entry_time.get(current, time.monotonic())
+            )
+
+            record_snapshot(
+                raw=raw,
+                adjusted=health,
+                sensitivity=ctx.evaluator_sensitivity,
+                mode_before=_prev_mode or current.value,
+                mode_proposed=proposed.value,
+                mode_after=current.value,
+                reason=_mode_manager._reason,
+            )
+
+            if _prev_mode is not None and _prev_mode != current.value:
+                prev_idx = _MODE_ORDER.index(SystemMode(_prev_mode))
+                curr_idx = _MODE_ORDER.index(SystemMode(current.value))
+                if curr_idx > prev_idx:
+                    _chain_depth += 1
+                    mode_escalation_chain_depth.set(_chain_depth)
+                elif curr_idx < prev_idx:
+                    if _chain_depth >= 1:
+                        mode_flips_total.inc()
+                    _chain_depth = 0
+                    mode_escalation_chain_depth.set(0)
+
+            if proposed != current:
+                mode_proposal_rejected_total.labels(reason="hysteresis").inc()
+
+            _prev_mode = current.value
+
+        except asyncio.CancelledError:
+            break
+        except Exception as e:
+            logger.warning("mode_evaluator_error", error=str(e))
+
+
+# ── Mode debug endpoints ─────────────────────────────
+
+@app.get("/debug/mode/status")
+async def debug_mode_status():
+    from app.core.system_mode import get_mode_manager
+    mgr = get_mode_manager()
+    snap = await mgr.get_snapshot()
+    return {
+        "mode": snap.mode.value,
+        "reason": snap.reason,
+        "has_override": snap.is_manual_override,
+        "operator": snap.operator or "",
+        "ttl_seconds": snap.ttl_seconds,
+    }
+
+
+@app.get("/debug/mode/recorded-snapshots")
+async def debug_mode_recorded_snapshots(limit: int = 100):
+    from app.core.mode_simulator import get_recorded_snapshots
+    snaps = get_recorded_snapshots()[-limit:]
+    return [
+        {
+            "mode_before": s.mode_before,
+            "mode_proposed": s.mode_proposed,
+            "mode_after": s.mode_after,
+            "reason": s.reason,
+            "sensitivity": s.sensitivity,
+            "raw_db": round(s.raw_metrics.get("db_pool_utilization_pct", 0), 1),
+            "raw_redis": round(s.raw_metrics.get("redis_memory_pct", 0), 1),
+            "raw_pending": int(s.raw_metrics.get("redis_max_pending", 0)),
+        }
+        for s in snaps
+    ]
+
+
+@app.get("/debug/mode/simulate")
+async def debug_mode_simulate(cycles: int = 3, seed: int | None = Query(None, description="Deterministic seed for reproducible simulations")):
+    from app.core.mode_simulator import synthetic_oscillation, run_simulation
+    snapshots = synthetic_oscillation(cycles=cycles, seed=seed)
+    report = run_simulation(snapshots, start_mode="normal")
+    return report.summary()
+
+
+@app.post("/debug/mode/toggle-recording")
+async def debug_mode_toggle_recording():
+    from app.core.mode_simulator import enable_recording, disable_recording, _RECORDING_ENABLED
+    if _RECORDING_ENABLED:
+        disable_recording()
+        return {"recording": False}
+    enable_recording()
+    return {"recording": True}
 
 
 # Import and include routers

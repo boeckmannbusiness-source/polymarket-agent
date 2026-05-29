@@ -1,4 +1,5 @@
 import asyncio
+import uuid
 from typing import Any
 
 from app.config import settings
@@ -59,6 +60,7 @@ class PolygonRPCListener(BaseIngester):
     async def _process_block(self, block_num: int):
         try:
             block = self.w3.eth.get_block(block_num, full_transactions=True)
+            correlation_id = str(uuid.uuid4())
 
             for tx in block.transactions:
                 if isinstance(tx, dict) and tx.get("to"):
@@ -66,19 +68,20 @@ class PolygonRPCListener(BaseIngester):
                     if isinstance(to_addr, str):
                         to_checksum = Web3.to_checksum_address(to_addr)
                         if to_checksum == self.ctf_exchange:
-                            await self._process_ctf_trade(tx, block_num)
+                            await self._process_ctf_trade(tx, block_num, correlation_id)
 
             await EventBus.publish(
                 "market:data",
                 "block_processed",
                 self.name,
                 {"block_number": block_num, "tx_count": len(block.transactions)},
+                correlation_id=correlation_id,
             )
 
         except Exception as e:
             logger.error("block_process_failed", block=block_num, error=str(e))
 
-    async def _process_ctf_trade(self, tx: dict, block_num: int):
+    async def _process_ctf_trade(self, tx: dict, block_num: int, correlation_id: str):
         await EventBus.publish(
             "market:data",
             "onchain_trade",
@@ -91,6 +94,7 @@ class PolygonRPCListener(BaseIngester):
                 "value": str(tx.get("value", 0)),
                 "gas_price": str(tx.get("gasPrice", 0)),
             },
+            correlation_id=correlation_id,
         )
 
 

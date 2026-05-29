@@ -6,7 +6,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
-from app.models import Trade, Market, MarketEvent
+from app.models import Trade, MarketEvent, Position as PositionModel
 from app.core.logging import logger
 
 
@@ -14,7 +14,20 @@ class PaperEngine:
     def __init__(self, db: AsyncSession):
         self.db = db
         self.capital = settings.PAPER_INITIAL_CAPITAL
-        self.positions: dict[uuid.UUID, dict] = {}
+
+    async def initialize(self):
+        open_positions = await self.db.execute(
+            select(PositionModel).where(PositionModel.status == "OPEN")
+        )
+        open_positions = list(open_positions.scalars().all())
+        if open_positions:
+            logger.info(
+                "paper_engine_initialized",
+                open_positions=len(open_positions),
+                capital=self.capital,
+            )
+        else:
+            logger.info("paper_engine_initialized_no_open_positions")
 
     async def _get_latest_market_price(self, market_id: uuid.UUID) -> float | None:
         result = await self.db.execute(
@@ -54,14 +67,6 @@ class PaperEngine:
         trade.slippage = slippage
         trade.fee = fee
         trade.entry_timestamp = datetime.now(timezone.utc)
-
-        self.positions[trade.id] = {
-            "entry_price": fill_price,
-            "size": filled_size,
-            "side": trade.side,
-            "outcome": trade.outcome,
-            "market_id": trade.market_id,
-        }
 
         logger.info(
             "paper_order_filled",
@@ -134,8 +139,6 @@ class PaperEngine:
         trade.pnl_percent = pnl_percent
         trade.exit_timestamp = datetime.now(timezone.utc)
 
-        self.positions.pop(trade.id, None)
-
         logger.info(
             "paper_position_closed",
             trade_id=str(trade.id),
@@ -154,5 +157,3 @@ class PaperEngine:
             "pnl_percent": pnl_percent,
             "exit_price": exit_price,
         }
-
-

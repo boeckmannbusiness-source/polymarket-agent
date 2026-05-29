@@ -1,4 +1,5 @@
 import asyncio
+import uuid
 from datetime import datetime, timezone
 from typing import Any
 
@@ -36,6 +37,7 @@ class PolymarketRESTIngester(BaseIngester):
         logger.info("market_poller_started", interval=self.poll_interval)
         while self.running:
             try:
+                correlation_id = str(uuid.uuid4())
                 params = {
                     "limit": 100,
                     "closed": False,
@@ -55,6 +57,7 @@ class PolymarketRESTIngester(BaseIngester):
                             "market_metadata",
                             self.name,
                             market,
+                            correlation_id=correlation_id,
                         )
                         await self._upsert_market(market)
 
@@ -149,6 +152,7 @@ class PolymarketRESTIngester(BaseIngester):
         await asyncio.sleep(30)
         while self.running:
             try:
+                correlation_id = str(uuid.uuid4())
                 response = await self.client.get(
                     f"{settings.POLYMARKET_DATA_API_URL}/leaderboard",
                     params={"limit": 50},
@@ -160,6 +164,7 @@ class PolymarketRESTIngester(BaseIngester):
                         "leaderboard_snapshot",
                         self.name,
                         {"traders": traders, "timestamp": asyncio.get_event_loop().time()},
+                        correlation_id=correlation_id,
                     )
                     logger.info("leaderboard_polled", count=len(traders))
 

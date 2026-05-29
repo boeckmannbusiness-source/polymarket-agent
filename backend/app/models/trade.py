@@ -7,6 +7,8 @@ from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 from sqlalchemy.sql import func
 
+from sqlalchemy import Index
+
 from app.database import Base
 
 
@@ -20,6 +22,7 @@ class Trade(Base):
     status: Mapped[str] = mapped_column(String(32), nullable=False, default="pending")
     side: Mapped[str] = mapped_column(String(16), nullable=False)
     outcome: Mapped[str] = mapped_column(String(64), nullable=False)
+
     order_type: Mapped[str] = mapped_column(String(16), nullable=False, default="market")
     size: Mapped[float] = mapped_column(Numeric(24, 8), nullable=False)
     price: Mapped[float | None] = mapped_column(Numeric(24, 8), nullable=True)
@@ -37,5 +40,16 @@ class Trade(Base):
     agent_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
     risk_check_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
     extra_data: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    correlation_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True, index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
+Index(
+    "ix_trades_unique_open_per_market_outcome",
+    Trade.market_id,
+    Trade.outcome,
+    unique=True,
+    postgresql_where=Trade.status.in_(["open", "pending"]),
+    sqlite_where=Trade.status.in_(["open", "pending"]),
+)

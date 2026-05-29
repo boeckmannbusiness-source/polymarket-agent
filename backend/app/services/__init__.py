@@ -16,6 +16,7 @@ from .regime_service import RegimeService
 from .safety_service import SafetyService
 from .event_bridge import EventPersistenceBridge
 from .integrity_service import IntegrityService, get_integrity_counters
+from .price_utils import get_outcome_price, get_outcome_specific_price
 
 __all__ = [
     "MarketService",
@@ -37,4 +38,6 @@ __all__ = [
     "EventPersistenceBridge",
     "IntegrityService",
     "get_integrity_counters",
+    "get_outcome_price",
+    "get_outcome_specific_price",
 ]

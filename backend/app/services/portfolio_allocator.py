@@ -3,11 +3,11 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any
 
-from sqlalchemy import select, func
+from sqlalchemy import select, func, update, insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
-from app.models import Trade
+from app.models import Trade, StrategyAllocationState
 from app.core.logging import logger
 
 
@@ -64,6 +64,7 @@ class PortfolioAllocator:
         self._allocated_capital_per_strategy[strategy_name] = (
             self._allocated_capital_per_strategy.get(strategy_name, 0) + allocated_size
         )
+        await self._persist_allocation_state(strategy_name, allocated_size)
 
         return AllocatedPosition(
             size=round(allocated_size, 4),
@@ -205,9 +206,31 @@ class PortfolioAllocator:
         return buckets.get(market_archetype, "core")
 
     async def get_allocated_capital(self, strategy_name: str | None = None) -> dict[str, float]:
+        if not self._allocated_capital_per_strategy:
+            await self.restore_from_db()
         if strategy_name:
             return {strategy_name: self._allocated_capital_per_strategy.get(strategy_name, 0)}
         return dict(self._allocated_capital_per_strategy)
+
+    async def _persist_allocation_state(self, strategy_name: str, amount: float):
+        total = self._allocated_capital_per_strategy.get(strategy_name, 0)
+        stmt = (
+            update(StrategyAllocationState)
+            .where(StrategyAllocationState.strategy_name == strategy_name)
+            .values(allocated_capital=total)
+        )
+        result = await self.db.execute(stmt)
+        if result.rowcount == 0:
+            await self.db.execute(
+                insert(StrategyAllocationState).values(
+                    strategy_name=strategy_name, allocated_capital=total
+                )
+            )
+
+    async def restore_from_db(self):
+        result = await self.db.execute(select(StrategyAllocationState))
+        rows = list(result.scalars().all())
+        self._allocated_capital_per_strategy = {row.strategy_name: float(row.allocated_capital) for row in rows}
 
     def reset(self):
         self._allocated_capital_per_strategy = {}

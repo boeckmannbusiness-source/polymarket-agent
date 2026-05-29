@@ -1,29 +1,78 @@
+import asyncio
+from collections import deque
+
 from app.config import settings
 from app.core.logging import logger
+from app.core.metrics import telegram_send_failures_total
+
+
+class RateLimiter:
+    def __init__(self, max_per_minute: int = 30):
+        self._max = max_per_minute
+        self._timestamps: deque[float] = deque(maxlen=max_per_minute)
+
+    async def allow(self) -> bool:
+        now = asyncio.get_event_loop().time()
+        while self._timestamps and now - self._timestamps[0] > 60:
+            self._timestamps.popleft()
+        if len(self._timestamps) >= self._max:
+            return False
+        self._timestamps.append(now)
+        return True
 
 
 class NotificationService:
     def __init__(self):
-        self.alert_levels = {"debug": 0, "info": 1, "warning": 2, "critical": 3}
-        self.min_level = self.alert_levels.get(settings.TELEGRAM_ALERT_LEVEL, 1)
+        self._bot = None
+        self._rate_limiter = RateLimiter(max_per_minute=30)
+        self._buffer: deque[tuple[str, str]] = deque(maxlen=100)
+        self._alert_levels = {"debug": 0, "info": 1, "warning": 2, "critical": 3}
+        self._min_level = self._alert_levels.get(settings.TELEGRAM_ALERT_LEVEL, 1)
+
+    async def _ensure_bot(self):
+        if self._bot is None and settings.TELEGRAM_BOT_TOKEN:
+            from telegram import Bot
+            self._bot = Bot(token=settings.TELEGRAM_BOT_TOKEN)
 
     async def send_alert(self, message: str, level: str = "info"):
-        if self.alert_levels.get(level, 0) < self.min_level:
+        if self._alert_levels.get(level, 0) < self._min_level:
             return
 
         logger.info("alert", level=level, message=message)
 
-        if settings.TELEGRAM_BOT_TOKEN and settings.TELEGRAM_CHAT_ID:
-            await self._send_telegram(message)
+        if not settings.TELEGRAM_BOT_TOKEN or not settings.TELEGRAM_CHAT_ID:
+            return
+
+        if not await self._rate_limiter.allow():
+            self._buffer.append((message, level))
+            return
+
+        await self._send_telegram(message)
 
     async def _send_telegram(self, message: str):
-        try:
-            from telegram import Bot
+        await self._ensure_bot()
+        if self._bot is None:
+            return
+        for attempt in range(2):
+            try:
+                await self._bot.send_message(
+                    chat_id=settings.TELEGRAM_CHAT_ID,
+                    text=message,
+                    parse_mode="Markdown",
+                )
+                return
+            except Exception as e:
+                if attempt == 0:
+                    await asyncio.sleep(1)
+                else:
+                    telegram_send_failures_total.inc()
+                    logger.error("telegram_send_failed", error=str(e))
+                    self._buffer.append((message, "critical"))
 
-            bot = Bot(token=settings.TELEGRAM_BOT_TOKEN)
-            await bot.send_message(chat_id=settings.TELEGRAM_CHAT_ID, text=message, parse_mode="Markdown")
-        except Exception as e:
-            logger.error("telegram_send_failed", error=str(e))
+    async def flush_buffer(self):
+        while self._buffer:
+            msg, level = self._buffer.popleft()
+            await self.send_alert(msg, level=level)
 
     async def format_whale_alert(self, wallet_address: str, market_title: str, side: str, size: float, outcome: str) -> str:
         return (

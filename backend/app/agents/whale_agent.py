@@ -22,6 +22,7 @@ class WhaleAgent(BaseAgent):
                 for msg in messages:
                     data = msg.get("data", {})
                     event_type = msg.get("event_type", "")
+                    correlation_id = msg.get("correlation_id")
 
                     if event_type in ("onchain_trade", "trade"):
                         wallet = data.get("from") or data.get("maker_address") or data.get("wallet")
@@ -59,6 +60,7 @@ class WhaleAgent(BaseAgent):
                                         "wallet_score": wallet_score,
                                         "wallet_win_rate": wallet_win_rate,
                                     },
+                                    correlation_id=correlation_id,
                                 )
 
                     await EventBus.ack_message(r, "market:data", "whale_agent", msg["id"])

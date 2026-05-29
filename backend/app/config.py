@@ -63,8 +63,8 @@ class Settings(BaseSettings):
 
     # Database
     DATABASE_URL: str = "postgresql+asyncpg://user:password@host:5432/polymarket"
-    DATABASE_POOL_SIZE: int = 2
-    DATABASE_MAX_OVERFLOW: int = 1
+    DATABASE_POOL_SIZE: int = 15
+    DATABASE_MAX_OVERFLOW: int = 5
 
     # Redis
     REDIS_URL: str = "redis://user:password@host:6379/0"
@@ -113,6 +113,35 @@ class Settings(BaseSettings):
     MEMORY_WARN_MB: int = 500
     EVENT_LOOP_STALL_SECONDS: float = 2.0
     TASK_WATCHDOG_INTERVAL: int = 60
+
+    # ── Dedup ─────────────────────────────────────────────────
+    DEDUP_REDIS_ENABLED: bool = True
+    DEDUP_TTL_SECONDS: int = 3600
+    DEDUP_MAX_KEYS: int = 100000
+    DEDUP_REDIS_PREFIX: str = "dedup:event"
+
+    # ── Pending message recovery ──────────────────────────────
+    PENDING_RECOVERY_ENABLED: bool = True
+    PENDING_RECOVERY_INTERVAL: int = 60
+    PENDING_IDLE_TIMEOUT: int = 120
+    PENDING_MAX_RETRIES: int = 3
+    PENDING_CLAIM_COUNT: int = 100
+    PENDING_DLQ_STREAM: str = "system:dlq:pending"
+
+    # ── DLQ replay ────────────────────────────────────────────
+    DLQ_REPLAY_ENABLED: bool = True
+    DLQ_REPLAY_INTERVAL: int = 300
+    DLQ_REPLAY_MAX_RETRIES: int = 5
+    DLQ_REPLAY_BACKOFF_BASE: float = 5.0
+    DLQ_REPLAY_MAX_ENTRIES: int = 100
+
+    # ── WS stall detection ────────────────────────────────────
+    WS_STALE_TIMEOUT: int = 30
+    WS_WATCHDOG_INTERVAL: int = 15
+
+    # ── Stream trimming ───────────────────────────────────────
+    STREAM_TRIM_APPROX: bool = True
+    STREAM_TRIM_INTERVAL: int = 600
 
 
 settings = Settings()

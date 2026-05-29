@@ -6,6 +6,7 @@ from sqlalchemy import select
 from app.agents.base import BaseAgent
 from app.core.events import EventBus
 from app.core.logging import logger
+from app.core.timing import record_latency
 from app.database import async_session_factory
 from app.models import Trade
 from app.services.trade_service import TradeService, FORCE_TRADING_DISABLED, MICRO_LIVE_SAFE_MODE
@@ -35,6 +36,7 @@ class ExecutionAgent(BaseAgent):
                 for msg in messages:
                     data = msg.get("data", {})
                     event_type = msg.get("event_type", "")
+                    correlation_id = msg.get("correlation_id")
 
                     if event_type == "trade.risk_approved":
                         errors = validate_signal_fields(data)
@@ -42,7 +44,7 @@ class ExecutionAgent(BaseAgent):
                             dead_letter_signals.append({"data": data, "errors": errors, "stage": "execution_agent_reject"})
                             logger.warning("exec_skip_invalid_signal", errors=errors, signal_id=data.get("signal_id"))
                         else:
-                            await self.execute_trade(data)
+                            await self.execute_trade(data, correlation_id)
 
                     await EventBus.ack_message(r, "trade:request", "execution_agent", msg["id"])
 
@@ -84,7 +86,23 @@ class ExecutionAgent(BaseAgent):
             return False
         return True
 
-    async def execute_trade(self, data: dict):
+    async def execute_trade(self, data: dict, correlation_id: str | None = None):
+        from app.core.system_mode import get_mode_manager
+        if not get_mode_manager().can_execute_trades():
+            signal_id = data["signal_id"]
+            logger.warning("exec_blocked_system_mode", signal_id=signal_id)
+            await inc_execution_failure()
+            await EventBus.publish(
+                "trade:execution",
+                "trade.failed",
+                self.name,
+                {"signal_id": signal_id, "error": "trading_halted_system_mode"},
+                correlation_id=correlation_id,
+            )
+            await self.log_event("trade_failed", {"signal_id": signal_id, "error": "trading_halted_system_mode"}, correlation_id=correlation_id)
+            return
+
+        _start = __import__("time").perf_counter_ns()
         signal_id = data["signal_id"]
         market_id = data["market_id"]
         condition_id = data.get("condition_id")
@@ -118,8 +136,9 @@ class ExecutionAgent(BaseAgent):
                 "trade.failed",
                 self.name,
                 {"signal_id": signal_id, "market_id": market_id, "strategy": strategy, "error": "trading_halted_risk_overlay"},
+                correlation_id=correlation_id,
             )
-            await self.log_event("trade_failed", {"signal_id": signal_id, "error": "trading_halted"})
+            await self.log_event("trade_failed", {"signal_id": signal_id, "error": "trading_halted"}, correlation_id=correlation_id)
             return
 
         micro_live_ok = await self._check_micro_live(data)
@@ -130,8 +149,9 @@ class ExecutionAgent(BaseAgent):
                 "trade.failed",
                 self.name,
                 {"signal_id": signal_id, "market_id": market_id, "strategy": strategy, "error": "micro_live_restrictions"},
+                correlation_id=correlation_id,
             )
-            await self.log_event("trade_failed", {"signal_id": signal_id, "error": "micro_live_restrictions"})
+            await self.log_event("trade_failed", {"signal_id": signal_id, "error": "micro_live_restrictions"}, correlation_id=correlation_id)
             return
 
         async with async_session_factory() as db:
@@ -149,8 +169,9 @@ class ExecutionAgent(BaseAgent):
                     "trade.failed",
                     self.name,
                     {"signal_id": signal_id, "market_id": market_id, "strategy": strategy, "error": f"exposure_limit:{exposure_check.reason}"},
+                    correlation_id=correlation_id,
                 )
-                await self.log_event("trade_failed", {"signal_id": signal_id, "error": exposure_check.reason})
+                await self.log_event("trade_failed", {"signal_id": signal_id, "error": exposure_check.reason}, correlation_id=correlation_id)
                 return
 
             existing = await db.execute(
@@ -169,8 +190,9 @@ class ExecutionAgent(BaseAgent):
                     "trade.failed",
                     self.name,
                     {"signal_id": signal_id, "market_id": market_id, "strategy": strategy, "error": "duplicate_market_position"},
+                    correlation_id=correlation_id,
                 )
-                await self.log_event("trade_failed", {"signal_id": signal_id, "error": "duplicate_market_position"})
+                await self.log_event("trade_failed", {"signal_id": signal_id, "error": "duplicate_market_position"}, correlation_id=correlation_id)
                 return
 
             service = TradeService(db)
@@ -182,6 +204,7 @@ class ExecutionAgent(BaseAgent):
                 size=float(size),
                 reason=f"Auto-execution signal={signal_id} strategy={strategy} confidence={confidence}",
                 agent_id=strategy,
+                correlation_id=correlation_id,
             )
 
             try:
@@ -210,8 +233,9 @@ class ExecutionAgent(BaseAgent):
                         "slippage": float(trade.slippage or 0),
                         "fee": float(trade.fee or 0),
                     },
+                    correlation_id=correlation_id,
                 )
-                await self.log_event("trade_executed", {"trade_id": str(trade.id), "signal_id": signal_id, "strategy": strategy})
+                await self.log_event("trade_executed", {"trade_id": str(trade.id), "signal_id": signal_id, "strategy": strategy}, correlation_id=correlation_id)
             except Exception as e:
                 await inc_execution_failure()
                 await EventBus.publish(
@@ -219,5 +243,8 @@ class ExecutionAgent(BaseAgent):
                     "trade.failed",
                     self.name,
                     {"signal_id": signal_id, "market_id": str(market_uuid), "strategy": strategy, "error": str(e)},
+                    correlation_id=correlation_id,
                 )
-                await self.log_event("trade_failed", {"signal_id": signal_id, "error": str(e)})
+                await self.log_event("trade_failed", {"signal_id": signal_id, "error": str(e)}, correlation_id=correlation_id)
+            finally:
+                record_latency("execution", (__import__("time").perf_counter_ns() - _start) / 1_000_000)

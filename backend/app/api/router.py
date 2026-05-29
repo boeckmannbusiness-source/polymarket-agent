@@ -1,6 +1,6 @@
 from fastapi import APIRouter
 
-from app.api import health, markets, wallets, signals, trades, agents, strategies, portfolio, execution, backtesting, analytics, attribution
+from app.api import health, markets, wallets, signals, trades, agents, strategies, portfolio, execution, backtesting, analytics, attribution, trace, system, cockpit
 
 router = APIRouter()
 
@@ -16,3 +16,6 @@ router.include_router(execution.router, prefix="/execution", tags=["execution"])
 router.include_router(backtesting.router, prefix="/backtesting", tags=["backtesting"])
 router.include_router(analytics.router, prefix="/analytics", tags=["analytics"])
 router.include_router(attribution.router, prefix="/attribution", tags=["attribution"])
+router.include_router(trace.router, prefix="/trace", tags=["trace"])
+router.include_router(system.router, prefix="/system", tags=["system"])
+router.include_router(cockpit.router, prefix="/cockpit", tags=["cockpit"])
