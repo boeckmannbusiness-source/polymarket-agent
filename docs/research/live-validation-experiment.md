@@ -30,10 +30,26 @@ The experiment will use the `correlation_id` to trace every signal from generati
 | **Latency** | `Trade.execution_ms` | Measure impact of expertise lookup |
 | **Divergence** | `Real PnL - ReplayEngine Predicted PnL` | Identify simulation bias |
 | **Stability** | `Sharpe / Variance` by category | Measure domain robustness |
+| **Price Alpha** | `Theoretical Price - Actual Fill Price` | Separate Signal vs. Execution quality |
 
 ---
 
-## 4. Implementation Plan
+## 4. Signal vs. Execution Quality Separation
+
+To prevent misattributing execution advantages as strategy alpha, we will instrument three distinct price points for every signal:
+
+1.  **Theoretical Entry Price**: The mid-price at the exact millisecond the signal was generated (Strategy Alpha).
+2.  **Actual Fill Price**: The volume-weighted average price (VWAP) achieved by the execution pipeline.
+3.  **Optimal Window Price**: The best available price (bid/ask) within a 30-second window following the signal.
+
+### Attribution Logic
+- **Signal Quality**: `(Final Price - Theoretical Price) / Theoretical Price`
+- **Execution Efficiency**: `(Theoretical Price - Actual Price) / Theoretical Price`
+- **Execution Opportunity Cost**: `(Actual Price - Optimal Window Price) / Theoretical Price`
+
+---
+
+## 5. Implementation Plan
 
 ### Phase 1: Instrumentation (Days 1-2)
 - Add `experimental_group` tag to the `Signal` and `Trade` models.
@@ -54,7 +70,7 @@ The experiment will use the `correlation_id` to trace every signal from generati
 
 ---
 
-## 5. Success Criteria for Refactor
+## 6. Success Criteria for Refactor
 Architectural refactor to the 'Expertise Registry' model will proceed only if:
 1.  **Expertise Following (B)** shows >15% higher Profit Factor than **Standard (A)**.
 2.  **Signal Divergence** is <10% compared to ReplayEngine predictions.
