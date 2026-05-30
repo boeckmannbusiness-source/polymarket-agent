@@ -191,11 +191,21 @@ async def toggle_strategy_quarantine(
 @router.post("/emergency/close-all")
 async def emergency_close_all(
     db: AsyncSession = Depends(get_db),
-    _admin=Depends(_require_admin)
+    _admin=Depends(_require_admin),
+    telegram_user: str | None = Query(None)
 ):
     from app.services.trade_service import TradeService
+    from app.models.remote_audit import RemoteControlAudit
     service = TradeService(db)
     count = await service.close_all_positions()
+
+    audit = RemoteControlAudit(
+        telegram_user=telegram_user or "unknown_api",
+        command="/confirm_closeall (API)",
+        result=f"Success: closed {count} positions"
+    )
+    db.add(audit)
+
     await db.commit()
     return {"status": "ok", "closed_count": count}
 
