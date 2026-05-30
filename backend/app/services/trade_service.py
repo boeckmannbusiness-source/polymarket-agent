@@ -61,10 +61,11 @@ class TradeService:
             raise TradeExecutionError("Trading disabled by operator kill switch.")
 
         # Unified Safety Check (Circuit Breakers, Kill Switch, Stale Data, Quarantined Strategies)
+        # We pass request.confidence as-is; SafetyService handles None (currently ignores it)
         safety_check = await self.safety_service.check_trade_approval(
             strategy_name=request.agent_id or "unknown",
             size=request.size,
-            confidence=getattr(request, "confidence", 1.0) or 1.0,
+            confidence=request.confidence if request.confidence is not None else 0.0,
         )
         if not safety_check.approved:
             raise TradeExecutionError(f"Safety check failed: {', '.join(safety_check.reasons)}")
@@ -94,11 +95,12 @@ class TradeService:
                 raise TradeExecutionError(f"Micro-live safety mode: {violation}")
 
         # Risk and Exposure Validation
+        # RiskService handles confidence=None by defaulting to 0.0 for safety
         risk_check = await self.risk_service.validate_trade(
             market_id=request.market_id,
             side=request.side,
             size=request.size,
-            confidence=getattr(request, "confidence", 1.0) or 1.0,
+            confidence=request.confidence,
             agent_id=request.agent_id,
         )
         if not risk_check.approved:
@@ -125,7 +127,7 @@ class TradeService:
         from app.services.portfolio_allocator import PortfolioAllocator
         allocator = PortfolioAllocator(self.db)
         allocation = await allocator.allocate(
-            signal_confidence=1.0,
+            signal_confidence=request.confidence if request.confidence is not None else 0.0,
             strategy_name=request.agent_id or "unknown",
             market_archetype="medium_liquidity",
             regime="normal",

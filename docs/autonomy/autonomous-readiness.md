@@ -24,9 +24,9 @@ The system employs a multi-strategy ensemble approach, which is a strong foundat
 Risk controls are multi-layered but currently contain some logic redundancy.
 
 - **GlobalRiskGuard:** Enforces hard limits on total exposure (2%), position size (0.2%), and market-specific exposure (0.5%).
-- **RiskService:** Provides additional checks on confidence thresholds, daily loss limits, and cooldown periods.
+- **RiskService:** Provides checks on confidence thresholds, daily loss limits, and cooldown periods. It supports an `agent_id` parameter, reserved for future strategy-specific risk parameters (e.g., higher leverage for high-win-rate strategies).
 - **PortfolioAllocator:** Dynamically adjusts trade sizes based on strategy performance and market conditions.
-- **Redundancy:** Logic for position counting and exposure limits is shared between `RiskService` and `GlobalRiskGuard`, which could lead to inconsistent enforcement.
+- **Layered Redundancy:** Logic for position counting and exposure limits is intentionally shared between `RiskService` and `GlobalRiskGuard`. This "defense-in-depth" approach ensures that even if one service's configuration is misaligned, the most restrictive limit prevails. However, a future refactor should consolidate these into a unified `ValidationEngine`.
 
 ---
 
