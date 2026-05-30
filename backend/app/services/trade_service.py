@@ -60,12 +60,14 @@ class TradeService:
         if FORCE_TRADING_DISABLED:
             raise TradeExecutionError("Trading disabled by operator kill switch.")
 
+        # Strict Confidence Resolution: None is treated as 0.0 for maximum safety (fail-closed)
+        resolved_confidence = float(request.confidence) if request.confidence is not None else 0.0
+
         # Unified Safety Check (Circuit Breakers, Kill Switch, Stale Data, Quarantined Strategies)
-        # We pass request.confidence as-is; SafetyService handles None (currently ignores it)
         safety_check = await self.safety_service.check_trade_approval(
             strategy_name=request.agent_id or "unknown",
             size=request.size,
-            confidence=request.confidence if request.confidence is not None else 0.0,
+            confidence=resolved_confidence,
         )
         if not safety_check.approved:
             raise TradeExecutionError(f"Safety check failed: {', '.join(safety_check.reasons)}")
@@ -95,12 +97,11 @@ class TradeService:
                 raise TradeExecutionError(f"Micro-live safety mode: {violation}")
 
         # Risk and Exposure Validation
-        # RiskService handles confidence=None by defaulting to 0.0 for safety
         risk_check = await self.risk_service.validate_trade(
             market_id=request.market_id,
             side=request.side,
             size=request.size,
-            confidence=request.confidence,
+            confidence=resolved_confidence,
             agent_id=request.agent_id,
         )
         if not risk_check.approved:
@@ -127,7 +128,7 @@ class TradeService:
         from app.services.portfolio_allocator import PortfolioAllocator
         allocator = PortfolioAllocator(self.db)
         allocation = await allocator.allocate(
-            signal_confidence=request.confidence if request.confidence is not None else 0.0,
+            signal_confidence=resolved_confidence,
             strategy_name=request.agent_id or "unknown",
             market_archetype="medium_liquidity",
             regime="normal",

@@ -202,7 +202,7 @@ class ExecutionAgent(BaseAgent):
                 side=side,
                 outcome=outcome,
                 size=float(size),
-                confidence=float(confidence) if confidence is not None else None,
+                confidence=float(confidence) if confidence is not None else 0.0,
                 reason=f"Auto-execution signal={signal_id} strategy={strategy} confidence={confidence}",
                 agent_id=strategy,
                 correlation_id=correlation_id,

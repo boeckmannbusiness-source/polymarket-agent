@@ -40,7 +40,8 @@ async def test_confidence_handling_none(db_session):
         except Exception:
             pass
 
-    # Verify that confidence=None was treated as 0.0 in SafetyService and passed as None to RiskService
+    # Verify that confidence=None was resolved to 0.0 at the entry point
+    # and passed as 0.0 to all downstream services.
     service.safety_service.check_trade_approval.assert_called_with(
         strategy_name="test",
         size=10.0,
@@ -50,7 +51,7 @@ async def test_confidence_handling_none(db_session):
         market_id=request.market_id,
         side="buy",
         size=10.0,
-        confidence=None,
+        confidence=0.0,
         agent_id="test"
     )
 

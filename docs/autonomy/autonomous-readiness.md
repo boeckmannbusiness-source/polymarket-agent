@@ -95,10 +95,11 @@ Currently focused on simulation, with hooks for live execution.
 
 ## Implementation Roadmap
 
-### Phase 1: Hardening (Current)
+### Phase 1: Hardening (Complete)
 - Consolidate risk validation logic.
 - Integrate `SafetyService` into the primary `TradeService` flow.
-- Enhance `IntegrityService` alerting.
+- Strict confidence propagation: Implemented invariant that confidence must never be silently upgraded. `0.0` and `None` are resolved to `0.0` at the entry point and propagated consistently to Risk and Allocation layers.
+- Verified end-to-end consistency with integration tests (`test_confidence_pipeline.py`).
 
 ### Phase 2: Micro-Live (Target: Q2)
 - Execute with extremely small capital ($1-$5 positions).
