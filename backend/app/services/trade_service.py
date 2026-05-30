@@ -14,6 +14,7 @@ from app.engines.paper_engine import PaperEngine
 from app.services.integrity_service import IntegrityService
 from app.services.safety_service import SafetyService
 from app.core.exceptions import TradeExecutionError, MarketNotFoundError
+import json
 
 
 FORCE_TRADING_DISABLED = bool(settings.FORCE_TRADING_DISABLED)
@@ -59,6 +60,20 @@ class TradeService:
 
         if FORCE_TRADING_DISABLED:
             raise TradeExecutionError("Trading disabled by operator kill switch.")
+
+        try:
+            from app.redis import get_redis
+            r = await get_redis()
+            remote_state_raw = await r.get("remote:state")
+            if remote_state_raw:
+                remote_state = json.loads(remote_state_raw)
+                if not remote_state.get("tradingEnabled", True):
+                    raise TradeExecutionError("Trading disabled by remote control.")
+        except Exception as e:
+            # Redis failure should not block trading if not explicitly disabled
+            # but we log it. In a strict environment, we might fail-closed.
+            # For now, we continue but log the error.
+            logger.warning("failed_to_check_remote_state", error=str(e))
 
         # Strict Confidence Resolution: None is treated as 0.0 for maximum safety (fail-closed)
         resolved_confidence = float(request.confidence) if request.confidence is not None else 0.0
@@ -236,3 +251,17 @@ class TradeService:
 
     async def resume(self):
         self._emergency_stop = False
+
+    async def close_all_positions(self) -> int:
+        query = select(Trade).where(Trade.status.in_(["open", "pending"]))
+        result = await self.db.execute(query)
+        trades = list(result.scalars().all())
+        count = 0
+        for trade in trades:
+            try:
+                await self.close_trade(trade.id)
+                count += 1
+            except Exception as e:
+                logger.error("failed_to_close_position_in_bulk", trade_id=str(trade.id), error=str(e))
+        await self.db.flush()
+        return count

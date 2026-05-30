@@ -10,6 +10,7 @@ from app.services.regime_service import RegimeService
 from app.services.execution_simulator import ExecutionSimulator, OrderSide, OrderbookSnapshot
 from app.services.strategy_service import StrategyService
 from app.replay.feature_schemas import get_feature_schema, list_feature_versions, validate_features
+from app.api.system import _require_admin
 
 router = APIRouter()
 
@@ -185,6 +186,18 @@ async def toggle_strategy_quarantine(
     await service.quarantine_strategy(strategy_name, quarantine)
     await db.commit()
     return {"strategy": strategy_name, "quarantined": quarantine}
+
+
+@router.post("/emergency/close-all")
+async def emergency_close_all(
+    db: AsyncSession = Depends(get_db),
+    _admin=Depends(_require_admin)
+):
+    from app.services.trade_service import TradeService
+    service = TradeService(db)
+    count = await service.close_all_positions()
+    await db.commit()
+    return {"status": "ok", "closed_count": count}
 
 
 @router.post("/safety/check-trade")

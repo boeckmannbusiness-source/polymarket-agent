@@ -1,11 +1,19 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Header
 from pydantic import BaseModel
 
 from app.core.system_mode import SystemMode, ModeManager
 
 router = APIRouter()
 
+from app.config import settings
+
 _mode_manager: ModeManager | None = None
+
+
+async def _require_admin(x_admin_key: str = Header(default="")):
+    if settings.ADMIN_API_KEY:
+        if not x_admin_key or x_admin_key != settings.ADMIN_API_KEY:
+            raise HTTPException(status_code=403, detail="Forbidden")
 
 
 def set_mode_manager(mgr: ModeManager):

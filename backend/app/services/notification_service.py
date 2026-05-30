@@ -50,6 +50,14 @@ class NotificationService:
         await self._send_telegram(message)
 
     async def _send_telegram(self, message: str):
+        # Always publish to Redis for the TypeScript remote control bot
+        try:
+            from app.redis import get_redis
+            r = await get_redis()
+            await r.xadd("remote:notifications", {"message": message}, maxlen=1000)
+        except Exception as e:
+            logger.error("failed_to_publish_notification_to_redis", error=str(e))
+
         await self._ensure_bot()
         if self._bot is None:
             return
