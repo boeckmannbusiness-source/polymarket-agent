@@ -12,6 +12,7 @@ from app.core.timing import record_latency
 from app.services.risk_service import RiskService
 from app.engines.paper_engine import PaperEngine
 from app.services.integrity_service import IntegrityService
+from app.services.safety_service import SafetyService
 from app.core.exceptions import TradeExecutionError, MarketNotFoundError
 
 
@@ -24,6 +25,7 @@ class TradeService:
         self.db = db
         self.risk_service = RiskService(db)
         self.paper_engine = PaperEngine(db)
+        self.safety_service = SafetyService(db)
         self._emergency_stop = False
         self.integrity = IntegrityService(db)
 
@@ -58,6 +60,15 @@ class TradeService:
         if FORCE_TRADING_DISABLED:
             raise TradeExecutionError("Trading disabled by operator kill switch.")
 
+        # Unified Safety Check (Circuit Breakers, Kill Switch, Stale Data, Quarantined Strategies)
+        safety_check = await self.safety_service.check_trade_approval(
+            strategy_name=request.agent_id or "unknown",
+            size=request.size,
+            confidence=getattr(request, "confidence", 1.0) or 1.0,
+        )
+        if not safety_check.approved:
+            raise TradeExecutionError(f"Safety check failed: {', '.join(safety_check.reasons)}")
+
         market = await self.db.execute(select(Market).where(Market.id == request.market_id))
         if not market.scalar_one_or_none():
             raise MarketNotFoundError(f"Market {request.market_id} not found")
@@ -81,6 +92,19 @@ class TradeService:
             violation = await self._check_micro_live_restrictions(request)
             if violation:
                 raise TradeExecutionError(f"Micro-live safety mode: {violation}")
+
+        # Risk and Exposure Validation
+        risk_check = await self.risk_service.validate_trade(
+            market_id=request.market_id,
+            side=request.side,
+            size=request.size,
+            confidence=getattr(request, "confidence", 1.0) or 1.0,
+            agent_id=request.agent_id,
+        )
+        if not risk_check.approved:
+            from app.services.pipeline_metrics import inc_risk_rejected
+            await inc_risk_rejected()
+            raise TradeExecutionError(f"Risk check failed: {risk_check.reason}")
 
         from app.services.global_risk_guard import GlobalRiskGuard
         guard = GlobalRiskGuard(self.db)

@@ -11,6 +11,7 @@ class TradeCreateRequest(BaseModel):
     outcome: str
     order_type: str = Field(default="market", pattern="^(market|limit)$")
     size: float = Field(..., gt=0)
+    confidence: float | None = 1.0
     price: float | None = None
     stop_loss: float | None = None
     take_profit: float | None = None

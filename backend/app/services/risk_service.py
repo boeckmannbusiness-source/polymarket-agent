@@ -135,6 +135,8 @@ class RiskService:
         return 0
 
     async def _calculate_exposure(self) -> float:
+        # Note: This is redundant with GlobalRiskGuard but kept for backwards compatibility in current agents.
+        # TradeService now calls both for multi-layered protection.
         capital = settings.PAPER_INITIAL_CAPITAL
         open_trades = await self.db.execute(
             select(func.coalesce(func.sum(Trade.size), 0)).where(Trade.status.in_(["pending", "open"]))

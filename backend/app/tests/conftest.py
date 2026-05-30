@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, async_sess
 
 from app.database import Base, get_db
 from app.main import app
+from app.core.system_mode import ModeManager, set_global_manager
 
 
 # Register SQLite compilers for PostgreSQL-specific types
@@ -28,6 +29,13 @@ def compile_array_sqlite(type_, compiler, **kw):
 
 # Now import models (type compilers are registered so SQLite can handle PG types)
 from app.models import *  # noqa: F401, F403
+
+
+@pytest_asyncio.fixture(autouse=True, scope="function")
+async def setup_test_manager():
+    mgr = ModeManager()
+    set_global_manager(mgr)
+    yield mgr
 
 
 @pytest.fixture(scope="session")

@@ -130,8 +130,8 @@ async def test_execution_agent_arbitrary_outcome():
 
     db_mock = AsyncMock()
     mock_result = MagicMock()
-    mock_result.scalars.return_value.all.return_value = []
-    mock_result.scalar_one_or_none.return_value = None
+    mock_result.scalars.return_value.all.return_value = [MagicMock()]
+    mock_result.scalar_one_or_none.return_value = MagicMock()
     mock_result.scalar.return_value = 0
     db_mock.execute = AsyncMock(return_value=mock_result)
     db_mock.flush = AsyncMock()
@@ -142,25 +142,34 @@ async def test_execution_agent_arbitrary_outcome():
     mock_guard = AsyncMock()
     mock_guard.check_exposure = AsyncMock(return_value=MagicMock(approved=True))
 
+    mock_safety = AsyncMock()
+    mock_safety.check_trade_approval = AsyncMock(return_value=MagicMock(approved=True))
+
+    mock_risk = AsyncMock()
+    mock_risk.validate_trade = AsyncMock(return_value=MagicMock(approved=True))
+
     with patch("app.agents.execution_agent.async_session_factory", return_value=db_mock):
         with patch("app.agents.execution_agent.GlobalRiskGuard", return_value=mock_guard):
-            with patch.object(agent, "_check_risk_overlay", return_value=True):
-                with patch.object(agent, "_check_micro_live", return_value=True):
-                    for outcome in valid_outcomes:
-                        try:
-                            await agent.execute_trade({
-                                "signal_id": str(uuid4()),
-                                "market_id": str(uuid4()),
-                                "condition_id": str(uuid4()),
-                                "side": "buy",
-                                "outcome": outcome,
-                                "size": 100.0,
-                                "confidence": 0.8,
-                                "strategy": "test",
-                                "price": 0.5,
-                            })
-                        except Exception:
-                            pytest.fail(f"execute_trade raised for valid outcome: {outcome}")
+            with patch("app.services.trade_service.SafetyService", return_value=mock_safety):
+                with patch("app.services.trade_service.RiskService", return_value=mock_risk):
+                    with patch("app.core.events.EventBus.publish", new=AsyncMock()):
+                        with patch.object(agent, "_check_risk_overlay", return_value=True):
+                            with patch.object(agent, "_check_micro_live", return_value=True):
+                                for outcome in valid_outcomes:
+                                    try:
+                                        await agent.execute_trade({
+                                            "signal_id": str(uuid4()),
+                                            "market_id": str(uuid4()),
+                                            "condition_id": str(uuid4()),
+                                            "side": "buy",
+                                            "outcome": outcome,
+                                            "size": 100.0,
+                                            "confidence": 0.8,
+                                            "strategy": "test",
+                                            "price": 0.5,
+                                        })
+                                    except Exception as e:
+                                        pytest.fail(f"execute_trade raised for valid outcome: {outcome}. Error: {e}")
 
 
 @pytest.mark.asyncio
