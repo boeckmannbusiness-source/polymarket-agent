@@ -677,12 +677,7 @@ app.add_middleware(DebugEndpointGuard)
 
 # ── Admin auth ─────────────────────────────────────────
 from fastapi import Header as _Header, HTTPException as _HTTPException, Request as _Request
-
-
-async def _require_admin(x_admin_key: str = _Header(default="")):
-    if settings.ADMIN_API_KEY:
-        if not x_admin_key or x_admin_key != settings.ADMIN_API_KEY:
-            raise _HTTPException(status_code=403, detail="Forbidden")
+from app.api.system import _require_admin
 
 
 async def _debug_endpoint_guard(request: _Request):

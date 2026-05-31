@@ -14,6 +14,7 @@ from .execution_trace import ExecutionTrace
 from .trade_attribution import TradeAttribution
 from .strategy_allocation import StrategyAllocationState
 from .system_mode import SystemModeTransition
+from .remote_audit import RemoteControlAudit
 
 __all__ = [
     "Market",
