@@ -90,6 +90,15 @@ class PortfolioService:
         )
         return list(result.scalars().all())
 
+    async def get_portfolio_history(self, hours: int = 168) -> list[PortfolioSnapshot]:
+        cutoff = datetime.now(timezone.utc) - timedelta(hours=hours)
+        result = await self.db.execute(
+            select(PortfolioSnapshot)
+            .where(PortfolioSnapshot.timestamp >= cutoff)
+            .order_by(PortfolioSnapshot.timestamp)
+        )
+        return list(result.scalars().all())
+
     async def compute_portfolio_snapshot(self) -> PortfolioSnapshot:
         open_positions = await self.get_open_positions()
         closed_positions = await self.db.execute(
@@ -148,6 +157,7 @@ class PortfolioService:
             select(PortfolioSnapshot).order_by(desc(PortfolioSnapshot.timestamp)).limit(30)
         )
         snapshots = list(recent_snapshots.scalars().all())
+        latest = snapshots[0] if snapshots else None
 
         pnl_history = [float(s.total_realized_pnl or 0) + float(s.total_unrealized_pnl or 0) for s in snapshots]
         portfolio_values = [float(s.portfolio_value or 0) for s in snapshots]
@@ -159,6 +169,8 @@ class PortfolioService:
             "total_realized_pnl": total_realized_pnl,
             "total_pnl": total_unrealized_pnl + total_realized_pnl,
             "current_value": total_exposure + total_unrealized_pnl + total_realized_pnl,
+            "drawdown": float(latest.drawdown) if latest and latest.drawdown else 0,
+            "peak_value": float(latest.peak_value) if latest and latest.peak_value else 0,
             "pnl_history": pnl_history,
             "portfolio_value_history": portfolio_values,
             "positions": [

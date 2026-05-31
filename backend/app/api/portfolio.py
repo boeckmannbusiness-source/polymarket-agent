@@ -17,6 +17,22 @@ async def get_portfolio_summary(db: AsyncSession = Depends(get_db)):
     return await service.get_portfolio_summary()
 
 
+@router.get("/history")
+async def get_portfolio_history(hours: int = Query(168, ge=1, le=8760), db: AsyncSession = Depends(get_db)):
+    service = PortfolioService(db)
+    history = await service.get_portfolio_history(hours=hours)
+    return [
+        {
+            "portfolio_value": float(h.portfolio_value) if h.portfolio_value else 0,
+            "total_realized_pnl": float(h.total_realized_pnl) if h.total_realized_pnl else 0,
+            "total_unrealized_pnl": float(h.total_unrealized_pnl) if h.total_unrealized_pnl else 0,
+            "drawdown": float(h.drawdown) if h.drawdown else 0,
+            "timestamp": h.timestamp.isoformat(),
+        }
+        for h in history
+    ]
+
+
 @router.post("/snapshot")
 async def take_portfolio_snapshot(db: AsyncSession = Depends(get_db)):
     service = PortfolioService(db)

@@ -232,5 +232,32 @@ export const api = {
   },
 
   // Health
-  health: () => fetchAPI<{ status: string }>("/health"),
+  health: {
+    ping: () => fetchAPI<{ ping: string }>("/health/ping"),
+    status: () => fetchAPI<{
+      status: string;
+      timestamp: string;
+      metrics: {
+        portfolio_value: number;
+        drawdown: number;
+        kill_switch_active: boolean;
+        circuit_breaker_active: boolean;
+        active_strategies: number;
+        ws_events_last_minute: number;
+      };
+      alerts: string[];
+    }>("/health/status"),
+  },
+
+  // Portfolio
+  portfolio: {
+    summary: () => fetchAPI<any>("/portfolio/summary"),
+    history: (hours = 168) => fetchAPI<any[]>(`/portfolio/history?hours=${hours}`),
+  },
+
+  // Analytics
+  analytics: {
+    strategySummary: (days = 7) => fetchAPI<any>(`/analytics/strategy-summary?days=${days}`),
+    slippageSummary: (days = 7) => fetchAPI<any>(`/analytics/slippage-summary?days=${days}`),
+  },
 };

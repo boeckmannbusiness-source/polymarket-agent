@@ -289,4 +289,32 @@ async def strategy_summary(
     return {"rankings": rankings}
 
 
+@router.get("/slippage-summary")
+async def slippage_summary(
+    days: int = Query(default=7, ge=1, le=90),
+    db: AsyncSession = Depends(get_db),
+):
+    from app.models import Trade
+    cutoff = datetime.now(timezone.utc) - timedelta(days=days)
+
+    r = await db.execute(
+        select(Trade)
+        .where(Trade.status == "closed")
+        .where(Trade.exit_timestamp >= cutoff)
+    )
+    trades = list(r.scalars().all())
+
+    if not trades:
+        return {"total_trades": 0, "avg_slippage": 0, "total_slippage_usd": 0}
+
+    total_slippage = sum(float(t.slippage or 0) for t in trades)
+    avg_slippage = total_slippage / len(trades)
+
+    # Estimate USD impact if possible, or just report the ratio
+    return {
+        "total_trades": len(trades),
+        "avg_slippage": round(avg_slippage, 6),
+        "total_slippage_sum": round(total_slippage, 6),
+        "period_days": days
+    }
 
