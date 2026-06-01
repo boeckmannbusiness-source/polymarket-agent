@@ -15,6 +15,8 @@ from .trade_attribution import TradeAttribution
 from .strategy_allocation import StrategyAllocationState
 from .system_mode import SystemModeTransition
 from .remote_audit import RemoteControlAudit
+from .portfolio_audit_log import PortfolioAuditLog
+from .benchmark_price import BenchmarkPrice
 
 __all__ = [
     "Market",
@@ -42,4 +44,7 @@ __all__ = [
     "TradeAttribution",
     "StrategyAllocationState",
     "SystemModeTransition",
+    "RemoteControlAudit",
+    "PortfolioAuditLog",
+    "BenchmarkPrice",
 ]

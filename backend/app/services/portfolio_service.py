@@ -6,7 +6,7 @@ from decimal import Decimal
 from sqlalchemy import select, desc, func, and_
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models import Position, PortfolioSnapshot, MarketCorrelation, Market, SignalOutcome
+from app.models import Position, PortfolioSnapshot, MarketCorrelation, Market, SignalOutcome, PortfolioAuditLog
 
 
 class PortfolioService:
@@ -41,6 +41,17 @@ class PortfolioService:
         )
         self.db.add(pos)
         await self.db.flush()
+
+        audit = PortfolioAuditLog(
+            event_type="POSITION_OPEN",
+            delta_cash=None,
+            delta_exposure=size * entry_price,
+            reference_id=pos.id,
+            description=f"OPEN {direction} {size}@{entry_price} market={market_condition_id}",
+            timestamp=datetime.now(timezone.utc),
+        )
+        self.db.add(audit)
+        await self.db.flush()
         return pos
 
     async def close_position(self, position_id: uuid.UUID, exit_price: float) -> Position | None:
@@ -58,6 +69,17 @@ class PortfolioService:
         pos.unrealized_pnl = 0.0
         pos.status = "CLOSED"
         pos.closed_at = datetime.now(timezone.utc)
+        await self.db.flush()
+
+        audit = PortfolioAuditLog(
+            event_type="POSITION_CLOSE",
+            delta_cash=float(pos.realized_pnl or 0),
+            delta_exposure=-float(pos.size * pos.entry_price),
+            reference_id=pos.id,
+            description=f"CLOSE {pos.direction} {float(pos.size)}@{exit_price} pnl={float(pos.realized_pnl or 0):+.2f}",
+            timestamp=datetime.now(timezone.utc),
+        )
+        self.db.add(audit)
         await self.db.flush()
         return pos
 
@@ -99,6 +121,18 @@ class PortfolioService:
         )
         return list(result.scalars().all())
 
+    async def _resolve_category(self, position: Position) -> str:
+        if position.market_id:
+            result = await self.db.execute(
+                select(Market.category).where(Market.id == position.market_id)
+            )
+            cat = result.scalar_one_or_none()
+            if cat:
+                return cat
+        if position.market_condition_id and "-" in position.market_condition_id:
+            return position.market_condition_id.split("-")[0]
+        return "other"
+
     async def compute_portfolio_snapshot(self) -> PortfolioSnapshot:
         open_positions = await self.get_open_positions()
         closed_positions = await self.db.execute(
@@ -123,7 +157,7 @@ class PortfolioService:
 
         category_exposure = {}
         for pos in open_positions:
-            cat = pos.market_condition_id.split("-")[0] if pos.market_condition_id and "-" in pos.market_condition_id else "other"
+            cat = await self._resolve_category(pos)
             category_exposure[cat] = category_exposure.get(cat, 0) + float(pos.size * (pos.current_price or pos.entry_price))
 
         snapshot = PortfolioSnapshot(

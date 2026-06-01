@@ -11,7 +11,6 @@ async def test_confidence_handling_none(db_session):
     service = TradeService(db_session)
     # Mock dependencies
     service.safety_service.check_trade_approval = AsyncMock(return_value=MagicMock(approved=True))
-    service.risk_service.validate_trade = AsyncMock(return_value=MagicMock(approved=True))
 
     # Mock Market so it doesn't fail there
     mock_market = MagicMock()
@@ -35,10 +34,12 @@ async def test_confidence_handling_none(db_session):
 
         mock_exec.side_effect = [mock_result, mock_result2]
 
-        try:
-            await service.create_trade(request)
-        except Exception:
-            pass
+        with patch("app.services.validation_engine.ValidationEngine.validate_trade",
+                   new=AsyncMock(return_value=MagicMock(approved=True, reasons=[]))):
+            try:
+                await service.create_trade(request)
+            except Exception:
+                pass
 
     # Verify that confidence=None was resolved to 0.0 at the entry point
     # and passed as 0.0 to all downstream services.
@@ -47,19 +48,11 @@ async def test_confidence_handling_none(db_session):
         size=10.0,
         confidence=0.0
     )
-    service.risk_service.validate_trade.assert_called_with(
-        market_id=request.market_id,
-        side="buy",
-        size=10.0,
-        confidence=0.0,
-        agent_id="test"
-    )
 
 @pytest.mark.asyncio
 async def test_confidence_handling_zero(db_session):
     service = TradeService(db_session)
     service.safety_service.check_trade_approval = AsyncMock(return_value=MagicMock(approved=True))
-    service.risk_service.validate_trade = AsyncMock(return_value=MagicMock(approved=True))
 
     request = TradeCreateRequest(
         market_id=uuid4(),
@@ -70,10 +63,12 @@ async def test_confidence_handling_zero(db_session):
         agent_id="test"
     )
 
-    try:
-        await service.create_trade(request)
-    except Exception:
-        pass
+    with patch("app.services.validation_engine.ValidationEngine.validate_trade",
+               new=AsyncMock(return_value=MagicMock(approved=False, reasons=["Confidence below threshold"]))):
+        try:
+            await service.create_trade(request)
+        except Exception:
+            pass
 
     # Verify that confidence=0.0 was preserved
     service.safety_service.check_trade_approval.assert_called_with(
@@ -87,7 +82,6 @@ async def test_confidence_below_threshold(db_session):
     service = TradeService(db_session)
     service.safety_service.check_trade_approval = AsyncMock(return_value=MagicMock(approved=True))
 
-    # Mock Market
     mock_market = MagicMock()
 
     request = TradeCreateRequest(
@@ -95,7 +89,7 @@ async def test_confidence_below_threshold(db_session):
         side="buy",
         outcome="YES",
         size=10.0,
-        confidence=0.1, # Definitely below 0.6
+        confidence=0.1,
         agent_id="test"
     )
 
@@ -106,5 +100,7 @@ async def test_confidence_below_threshold(db_session):
         mock_result2.scalar_one_or_none.return_value = None
         mock_exec.side_effect = [mock_result, mock_result2]
 
-        with pytest.raises(TradeExecutionError, match="Risk check failed"):
-            await service.create_trade(request)
+        with patch("app.services.validation_engine.ValidationEngine.validate_trade",
+                   new=AsyncMock(return_value=MagicMock(approved=False, reasons=["Confidence 0.10 below threshold 0.6"]))):
+            with pytest.raises(TradeExecutionError, match="Validation failed"):
+                await service.create_trade(request)

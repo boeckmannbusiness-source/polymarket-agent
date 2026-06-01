@@ -5,6 +5,14 @@ dotenv.config();
 
 const botToken = process.env.TELEGRAM_BOT_TOKEN;
 const chatId = process.env.TELEGRAM_CHAT_ID;
+const minAlertLevel = (process.env.TELEGRAM_ALERT_LEVEL || 'info').toLowerCase();
+
+const ALERT_LEVELS: Record<string, number> = {
+  debug: 0,
+  info: 1,
+  warning: 2,
+  critical: 3,
+};
 
 let bot: TelegramBot | null = null;
 
@@ -12,7 +20,16 @@ if (botToken) {
   bot = new TelegramBot(botToken);
 }
 
-export async function sendNotification(message: string, parseMode: TelegramBot.ParseMode = 'Markdown') {
+export function shouldSend(level: string = 'info'): boolean {
+  const msgLevel = ALERT_LEVELS[level.toLowerCase()] ?? 1;
+  const minLevel = ALERT_LEVELS[minAlertLevel] ?? 1;
+  return msgLevel >= minLevel;
+}
+
+export async function sendNotification(message: string, parseMode: TelegramBot.ParseMode = 'Markdown', level: string = 'info') {
+  if (!shouldSend(level)) {
+    return;
+  }
   if (bot && chatId) {
     try {
       await bot.sendMessage(chatId, message, { parse_mode: parseMode });
@@ -34,7 +51,7 @@ export async function notifyTradeOpened(data: any) {
 *Position Exposure:* ${data.exposure || 'N/A'}
 *Portfolio Risk:* ${data.risk || 'N/A'}`;
 
-  await sendNotification(message);
+  await sendNotification(message, 'Markdown', 'info');
 }
 
 export async function notifyTradeClosed(data: any) {
@@ -45,7 +62,7 @@ export async function notifyTradeClosed(data: any) {
 *Duration:* ${data.duration || 'N/A'}
 *Reason:* ${data.reason || 'N/A'}`;
 
-  await sendNotification(message);
+  await sendNotification(message, 'Markdown', 'info');
 }
 
 export async function notifyRiskAlert(data: any) {
@@ -55,7 +72,7 @@ export async function notifyRiskAlert(data: any) {
 *Reason:* ${data.reason || 'N/A'}
 *Action Taken:* ${data.action || 'N/A'}`;
 
-  await sendNotification(message);
+  await sendNotification(message, 'Markdown', 'warning');
 }
 
 export async function notifySystemFailure(data: any) {
@@ -65,5 +82,5 @@ export async function notifySystemFailure(data: any) {
 *Error:* ${data.error || 'N/A'}
 *Current Mode:* ${data.mode || 'N/A'}`;
 
-  await sendNotification(message);
+  await sendNotification(message, 'Markdown', 'critical');
 }

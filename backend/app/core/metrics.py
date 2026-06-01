@@ -41,6 +41,7 @@ persistence_latency = Histogram("polymarket_persistence_latency_ms", "Market eve
 allocation_latency = Histogram("polymarket_allocation_latency_ms", "Portfolio allocation latency", buckets=_FAST_BUCKETS)
 db_query_latency = Histogram("polymarket_db_query_latency_ms", "DB query latency", buckets=_FAST_BUCKETS, labelnames=["query_type"])
 end_to_end_latency = Histogram("polymarket_trade_e2e_latency_ms", "End-to-end trade latency", buckets=_E2E_BUCKETS)
+event_to_execution_latency = Histogram("polymarket_event_to_execution_latency_ms", "Market event → execution decision latency", buckets=_E2E_BUCKETS)
 
 system_mode_gauge = Gauge("polymarket_system_mode", "Current system mode (1 if active)", ["mode"])
 mode_transitions_total = Counter("polymarket_mode_transitions_total", "Mode transitions", ["from_mode", "to_mode"])

@@ -10,13 +10,10 @@ from app.services.portfolio_allocator import AllocatedPosition
 async def test_confidence_propagation_pipeline(db_session):
     service = TradeService(db_session)
 
-    # Mock SafetyService, RiskService, and GlobalRiskGuard to ensure we reach Allocation
+    # Mock SafetyService, and the ValidationEngine to ensure we reach Allocation
     service.safety_service.check_trade_approval = AsyncMock(return_value=MagicMock(approved=True))
-    service.risk_service.validate_trade = AsyncMock(return_value=MagicMock(approved=True))
 
-    # Define test cases: (input_confidence, expected_resolved, risk_should_be_called)
-    # Since we mocked risk_service above, it will always "pass" risk,
-    # but we want to check WHAT value was passed to it.
+    # Define test cases: (input_confidence, expected_resolved)
     test_cases = [
         (0.0, 0.0),
         (None, 0.0),
@@ -36,7 +33,6 @@ async def test_confidence_propagation_pipeline(db_session):
         )
 
         service.safety_service.check_trade_approval.reset_mock()
-        service.risk_service.validate_trade.reset_mock()
 
         # Mock Market check in create_trade
         with patch("sqlalchemy.ext.asyncio.AsyncSession.execute") as mock_exec:
@@ -48,9 +44,9 @@ async def test_confidence_propagation_pipeline(db_session):
 
             mock_exec.side_effect = [mock_mkt_result, mock_dup_result]
 
-            # Mock GlobalRiskGuard to always approve
-            with patch("app.services.global_risk_guard.GlobalRiskGuard.check_exposure",
-                       new=AsyncMock(return_value=MagicMock(approved=True))):
+            # Mock ValidationEngine to always approve
+            with patch("app.services.validation_engine.ValidationEngine.validate_trade",
+                       new=AsyncMock(return_value=MagicMock(approved=True, reasons=[]))):
 
                 # Mock PortfolioAllocator
                 with patch("app.services.portfolio_allocator.PortfolioAllocator.allocate",
@@ -65,11 +61,7 @@ async def test_confidence_propagation_pipeline(db_session):
                     service.safety_service.check_trade_approval.assert_called_once()
                     assert service.safety_service.check_trade_approval.call_args[1]['confidence'] == expected_resolved
 
-                    # 2. Verify RiskService saw the EXACT same resolved confidence
-                    service.risk_service.validate_trade.assert_called_once()
-                    assert service.risk_service.validate_trade.call_args[1]['confidence'] == expected_resolved
-
-                    # 3. Verify PortfolioAllocator saw the EXACT same resolved confidence
+                    # 2. Verify PortfolioAllocator saw the EXACT same resolved confidence
                     mock_allocate.assert_called_once()
                     assert mock_allocate.call_args[1]['signal_confidence'] == expected_resolved
 

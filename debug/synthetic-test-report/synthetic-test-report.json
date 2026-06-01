@@ -1,0 +1,118 @@
+{
+  "seed": 42,
+  "duration_seconds": 72.8,
+  "scenarios": [
+    {
+      "name": "Whale Buy Cascade",
+      "events_injected": 16,
+      "signals_generated": 224,
+      "signals_rejected": 0,
+      "trades_executed": 6,
+      "trades_closed": 0,
+      "win_count": 0,
+      "loss_count": 0,
+      "avg_pnl": 0.0,
+      "max_drawdown": 0.0,
+      "strategy_activation": {
+        "whale_following": 62,
+        "ensemble": 157,
+        "momentum": 5
+      },
+      "guardian_disables": 0,
+      "overlay_states": [
+        "ACTIVE"
+      ],
+      "exit_reasons": {},
+      "crash_count": 0,
+      "determinism_hash": "0d4d449a95706b9e228b67e9018db279baa23d01112aaeedad7eba60becd500d",
+      "anomalies": [],
+      "passed": true,
+      "execution_details": [
+        {
+          "id": "c52b74e0-ac36-47a3-8080-7d20448d015e",
+          "market_id": "cbed0fc2-c232-4cf1-978e-e760c92968b8",
+          "status": "open",
+          "side": "buy",
+          "outcome": "YES",
+          "size": 2885.33,
+          "price": null,
+          "filled_price": 0.8082104,
+          "pnl": null,
+          "reason": "Auto-execution signal=62889c7c-9be9-40fb-ab04-e2780cd0140b strategy=ensemble confidence=0.5933",
+          "slippage": 0.001,
+          "created_at": "2026-05-29T16:22:52.631733+00:00"
+        },
+        {
+          "id": "e5073cf8-4a12-49c4-9869-4a00b8db9c74",
+          "market_id": "f2280643-531f-49d2-af33-7f7f35303de0",
+          "status": "cancelled",
+          "side": "buy",
+          "outcome": "YES",
+          "size": 3367.94002968,
+          "price": 0.15263719,
+          "filled_price": null,
+          "pnl": null,
+          "reason": null,
+          "slippage": null,
+          "created_at": "2026-05-21T12:46:32.427214+00:00"
+        },
+        {
+          "id": "2e5fd1c3-a9bd-4727-adde-88b2592ac5b7",
+          "market_id": "82aa8352-1419-4959-88bc-2b189a54a604",
+          "status": "cancelled",
+          "side": "buy",
+          "outcome": "YES",
+          "size": 492.13321054,
+          "price": 0.81421141,
+          "filled_price": null,
+          "pnl": null,
+          "reason": null,
+          "slippage": null,
+          "created_at": "2026-05-21T12:46:32.427214+00:00"
+        },
+        {
+          "id": "046109a9-809c-4073-bda5-e148ec0b644b",
+          "market_id": "48765b18-7dc4-4a51-ac6b-63d4b096a2e6",
+          "status": "cancelled",
+          "side": "buy",
+          "outcome": "YES",
+          "size": 1311.31794954,
+          "price": 0.63785425,
+          "filled_price": null,
+          "pnl": null,
+          "reason": null,
+          "slippage": null,
+          "created_at": "2026-05-21T12:46:32.427214+00:00"
+        },
+        {
+          "id": "dbb23eab-4ae0-4dd9-b9cb-fc7a19e3eed4",
+          "market_id": "aa29a929-4c8e-4ad1-817b-8f1e5d9cd563",
+          "status": "cancelled",
+          "side": "buy",
+          "outcome": "YES",
+          "size": 3882.66968635,
+          "price": 0.53234435,
+          "filled_price": null,
+          "pnl": null,
+          "reason": null,
+          "slippage": null,
+          "created_at": "2026-05-21T12:46:32.427214+00:00"
+        },
+        {
+          "id": "3da815ce-6097-493b-b701-2846521ba074",
+          "market_id": "0f3442df-c61c-488a-a664-8d898dbb1273",
+          "status": "cancelled",
+          "side": "buy",
+          "outcome": "YES",
+          "size": 1740.39251028,
+          "price": 0.79585568,
+          "filled_price": null,
+          "pnl": null,
+          "reason": null,
+          "slippage": null,
+          "created_at": "2026-05-21T12:46:32.427214+00:00"
+        }
+      ]
+    }
+  ]
+}

@@ -7,9 +7,38 @@ import dotenv from 'dotenv';
 
 dotenv.config();
 
-const redis = new Redis(process.env.REDIS_URL || 'redis://localhost:6379');
+// Redis connection with security hardening
+function createRedisClient(): Redis {
+  const url = process.env.REDIS_URL || 'redis://localhost:6379';
+  const password = process.env.REDIS_PASSWORD || '';
+  const tlsEnabled = process.env.REDIS_TLS === 'true';
+
+  // When using a full redis:// URL, password can be embedded: redis://:password@host:port
+  // For additional password override or TLS, use options
+  if (password) {
+    return new Redis(url, { password, tls: tlsEnabled ? {} : undefined as any });
+  }
+  if (tlsEnabled) {
+    return new Redis(url, { tls: {} });
+  }
+  return new Redis(url);
+}
+
+const redis = createRedisClient();
+
+redis.on('error', (err) => {
+  console.error('Redis connection error in commandHandler:', err.message);
+});
+
+redis.on('reconnecting', () => {
+  console.log('Redis reconnecting in commandHandler...');
+});
 const API_URL = process.env.API_URL || 'http://localhost:8000';
 const ADMIN_API_KEY = process.env.ADMIN_API_KEY || '';
+
+if (API_URL.startsWith('http://') && process.env.APP_ENV === 'production') {
+  console.warn('WARNING: API_URL is using http:// in production. ADMIN_API_KEY will be sent in cleartext!');
+}
 
 const AUDIT_STREAM = 'remote:audit';
 

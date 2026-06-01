@@ -4,17 +4,53 @@ import dotenv from 'dotenv';
 dotenv.config();
 
 let redis: Redis | null = null;
+let redisConnectPromise: Promise<void> | null = null;
+let reconnectAttempts = 0;
+const MAX_RECONNECT_ATTEMPTS = 10;
+const BASE_RECONNECT_DELAY_MS = 1000;
 
-function getRedis() {
-  if (!redis) {
-    redis = new Redis(process.env.REDIS_URL || 'redis://localhost:6379', {
-      maxRetriesPerRequest: 1
-    });
+function createRedisClient(): Redis {
+  const url = process.env.REDIS_URL || 'redis://localhost:6379';
+  const password = process.env.REDIS_PASSWORD || '';
+  const tlsEnabled = process.env.REDIS_TLS === 'true';
+
+  return new Redis(url, {
+    password: password || undefined as any,
+    tls: tlsEnabled ? {} : undefined as any,
+    maxRetriesPerRequest: 3,
+    retryStrategy: (times: number) => {
+      reconnectAttempts = times;
+      if (times > MAX_RECONNECT_ATTEMPTS) {
+        console.error('Max Redis reconnect attempts reached in remoteState');
+        return null;
+      }
+      const delay = Math.min(BASE_RECONNECT_DELAY_MS * Math.pow(2, times), 30000);
+      console.warn(`Redis reconnecting (attempt ${times}) in ${delay}ms...`);
+      return delay;
+    },
+    enableReadyCheck: true,
+    lazyConnect: true,
+  });
+}
+
+function getRedis(): Redis {
+  const needsNewClient = !redis || redis.status === 'end' || redis.status === 'close';
+  if (needsNewClient) {
+    if (redis) {
+      try { redis.disconnect(true); } catch (_) {}
+    }
+    redis = createRedisClient();
     redis.on('error', (err) => {
       console.warn('Redis connection error in remoteState:', err.message);
     });
+    redis.on('connect', () => {
+      reconnectAttempts = 0;
+    });
+    redisConnectPromise = redis.connect().catch((err) => {
+      console.warn('Redis initial connect failed in remoteState:', err.message);
+    });
   }
-  return redis;
+  return redis!;
 }
 
 export interface RemoteState {

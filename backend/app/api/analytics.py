@@ -318,3 +318,13 @@ async def slippage_summary(
         "period_days": days
     }
 
+
+@router.get("/attribution")
+async def alpha_vs_beta_attribution(
+    hours: int = Query(default=168, ge=1, le=8760),
+    db: AsyncSession = Depends(get_db),
+):
+    from app.services.benchmark_service import BenchmarkService
+    service = BenchmarkService(db)
+    return await service.compute_alpha_vs_beta(hours=hours)
+

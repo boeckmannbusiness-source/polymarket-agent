@@ -10,6 +10,7 @@ from app.core.metrics import (
     allocation_latency,
     db_query_latency,
     end_to_end_latency,
+    event_to_execution_latency,
 )
 
 _HISTOGRAM_MAP = {
@@ -21,6 +22,7 @@ _HISTOGRAM_MAP = {
     "allocation": allocation_latency,
     "db_query": db_query_latency,
     "end_to_end": end_to_end_latency,
+    "event_to_execution": event_to_execution_latency,
 }
 
 

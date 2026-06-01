@@ -111,34 +111,28 @@ class TradeService:
             if violation:
                 raise TradeExecutionError(f"Micro-live safety mode: {violation}")
 
-        # Risk and Exposure Validation
-        risk_check = await self.risk_service.validate_trade(
+        # Unified Risk and Exposure Validation
+        from app.services.validation_engine import ValidationEngine
+        validator = ValidationEngine(self.db)
+        validation = await validator.validate_trade(
             market_id=request.market_id,
             side=request.side,
             size=request.size,
             confidence=resolved_confidence,
             agent_id=request.agent_id,
+            outcome=request.outcome,
+            proposed_price=float(request.price or 0.5),
         )
-        if not risk_check.approved:
+        if not validation.approved:
             from app.services.pipeline_metrics import inc_risk_rejected
             await inc_risk_rejected()
-            raise TradeExecutionError(f"Risk check failed: {risk_check.reason}")
-
-        from app.services.global_risk_guard import GlobalRiskGuard
-        guard = GlobalRiskGuard(self.db)
-        exposure_check = await guard.check_exposure(
-            market_id=str(request.market_id),
-            outcome=request.outcome,
-            proposed_size=float(request.size),
-            proposed_price=float(request.price or 0),
-        )
-        if not exposure_check.approved:
-            from app.services.pipeline_metrics import inc_exposure_rejection
-            await inc_exposure_rejection()
-            raise TradeExecutionError(f"Exposure limit: {exposure_check.reason}")
+            raise TradeExecutionError(f"Validation failed: {'; '.join(validation.reasons)}")
 
         from app.services.pipeline_metrics import inc_signal
         await inc_signal()
+        from app.core.timing import record_latency
+        decision_ms = (__import__("time").perf_counter_ns() - _e2e_start) / 1_000_000
+        record_latency("event_to_execution", decision_ms)
 
         from app.services.portfolio_allocator import PortfolioAllocator
         allocator = PortfolioAllocator(self.db)

@@ -143,6 +143,15 @@ async def lifespan(app: FastAPI):
     bg_tasks.append(asyncio.create_task(_periodic_health_snapshot(), name="health_snapshot"))
     logger.info("health_snapshot_started")
 
+    bg_tasks.append(asyncio.create_task(_periodic_portfolio_snapshot(), name="portfolio_snapshot"))
+    logger.info("portfolio_snapshot_started")
+
+    bg_tasks.append(asyncio.create_task(_periodic_benchmark_recording(), name="benchmark_recording"))
+    logger.info("benchmark_recording_started")
+
+    bg_tasks.append(asyncio.create_task(_periodic_reconciliation(), name="reconciliation"))
+    logger.info("reconciliation_started")
+
     bg_tasks.append(asyncio.create_task(_periodic_pel_recovery(), name="pel_recovery"))
     logger.info("pel_recovery_started")
 
@@ -410,10 +419,13 @@ async def _periodic_exit_engine_loop():
     from app.database import async_session_factory
     from app.models import Trade
     from app.core.system_mode import get_mode_manager
+    from app.core.heartbeat import touch_loop_heartbeat
 
     await asyncio.sleep(15)
     while True:
         try:
+            touch_loop_heartbeat("exit_engine")
+
             if not get_mode_manager().can_write():
                 await asyncio.sleep(15)
                 continue
@@ -451,10 +463,13 @@ async def _periodic_exit_engine_loop():
 async def _periodic_risk_overlay_check():
     import asyncio
     from app.database import async_session_factory
+    from app.core.heartbeat import touch_loop_heartbeat
 
     await asyncio.sleep(20)
     while True:
         try:
+            touch_loop_heartbeat("risk_overlay")
+
             async with async_session_factory() as db:
                 overlay = RiskOverlay(db)
                 state = await overlay.check()
@@ -474,10 +489,13 @@ async def _periodic_risk_overlay_check():
 async def _periodic_strategy_guardian_eval():
     import asyncio
     from app.database import async_session_factory
+    from app.core.heartbeat import touch_loop_heartbeat
 
     await asyncio.sleep(60)
     while True:
         try:
+            touch_loop_heartbeat("strategy_guardian")
+
             async with async_session_factory() as db:
                 guardian = StrategyGuardian(db)
                 results = await guardian.evaluate_all()
@@ -561,10 +579,13 @@ async def _periodic_shadow_sync():
     from app.database import async_session_factory
     from app.services.shadow_trading_service import ShadowTradingService
     from app.services.live_trading_state_machine import LiveTradingStateMachine
+    from app.core.heartbeat import touch_loop_heartbeat
 
     await asyncio.sleep(30)
     while True:
         try:
+            touch_loop_heartbeat("shadow_sync")
+
             async with async_session_factory() as db:
                 shadow = ShadowTradingService(db)
                 await shadow.sync_from_live_trades()
@@ -581,10 +602,13 @@ async def _periodic_state_machine_check():
     from app.services.live_trading_state_machine import LiveTradingStateMachine
     from app.services.risk_overlay import RiskOverlay
     from app.services.pipeline_metrics import set_phase5_metrics
+    from app.core.heartbeat import touch_loop_heartbeat
 
     await asyncio.sleep(45)
     while True:
         try:
+            touch_loop_heartbeat("state_machine")
+
             async with async_session_factory() as db:
                 sm = LiveTradingStateMachine(db)
                 overlay = RiskOverlay(db)
@@ -611,6 +635,7 @@ async def _periodic_health_snapshot():
     from app.services.system_health_store import SystemHealthStore
     from app.services.pipeline_metrics import set_phase5_metrics, get_metrics
     from app.services.alert_manager import AlertManager, build_default_rules
+    from app.core.heartbeat import record_heartbeat
 
     alert_manager = AlertManager()
     alert_manager.register_rules(build_default_rules())
@@ -618,6 +643,8 @@ async def _periodic_health_snapshot():
     await asyncio.sleep(10)
     while True:
         try:
+            await record_heartbeat("health_snapshot", data={"loop_interval_s": 300})
+
             async with async_session_factory() as db:
                 store = SystemHealthStore(db)
                 snapshot = await store.record_snapshot()
@@ -641,6 +668,83 @@ async def _periodic_health_snapshot():
         except Exception as e:
             logger.warning("health_snapshot_error", error=str(e))
         await asyncio.sleep(300)
+
+
+async def _periodic_portfolio_snapshot():
+    import asyncio
+    from app.database import async_session_factory
+    from app.services.portfolio_service import PortfolioService
+    from app.core.heartbeat import touch_loop_heartbeat
+
+    await asyncio.sleep(120)
+    while True:
+        try:
+            touch_loop_heartbeat("portfolio_snapshot")
+
+            async with async_session_factory() as db:
+                service = PortfolioService(db)
+                snapshot = await service.compute_portfolio_snapshot()
+                await db.commit()
+                logger.info(
+                    "portfolio_snapshot_recorded",
+                    value=float(snapshot.portfolio_value or 0),
+                    drawdown=float(snapshot.drawdown or 0),
+                    positions=snapshot.open_positions,
+                )
+        except asyncio.CancelledError:
+            break
+        except Exception as e:
+            logger.warning("portfolio_snapshot_error", error=str(e))
+        await asyncio.sleep(3600)
+
+
+async def _periodic_benchmark_recording():
+    import asyncio
+    from app.database import async_session_factory
+    from app.services.benchmark_service import BenchmarkService
+    from app.core.heartbeat import touch_loop_heartbeat
+
+    await asyncio.sleep(180)
+    while True:
+        try:
+            touch_loop_heartbeat("benchmark_recording")
+
+            async with async_session_factory() as db:
+                service = BenchmarkService(db)
+                synthetic_price = await service.compute_synthetic_benchmark()
+                await service.record_benchmark_price(
+                    price=synthetic_price,
+                    source="synthetic",
+                )
+                await db.commit()
+        except asyncio.CancelledError:
+            break
+        except Exception as e:
+            logger.warning("benchmark_recording_error", error=str(e))
+        await asyncio.sleep(3600)
+
+
+async def _periodic_reconciliation():
+    import asyncio
+    from app.database import async_session_factory
+    from app.services.reconciliation_service import run_startup_reconciliation
+    from app.core.heartbeat import touch_loop_heartbeat
+
+    await asyncio.sleep(600)
+    while True:
+        try:
+            touch_loop_heartbeat("reconciliation")
+
+            async with async_session_factory() as db:
+                report = await run_startup_reconciliation(db)
+                issues = {k: v for k, v in report.items() if isinstance(v, int) and v > 0}
+                if issues:
+                    logger.info("periodic_reconciliation_report", report=issues)
+        except asyncio.CancelledError:
+            break
+        except Exception as e:
+            logger.warning("reconciliation_error", error=str(e))
+        await asyncio.sleep(43200)
 
 
 app = FastAPI(
