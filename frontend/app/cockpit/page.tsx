@@ -3,8 +3,6 @@
 import { useEffect, useState, useCallback, useRef } from "react";
 import { api, type CockpitOverview, type CockpitInstability, type CockpitExplanation } from "@/lib/api";
 import SystemHealthHeader from "./SystemHealthHeader";
-import SystemNarrative from "./SystemNarrative";
-import PrimarySignal from "./PrimarySignal";
 import DecisionBanner from "./DecisionBanner";
 import StabilityMetricsPanel from "./StabilityMetricsPanel";
 import ModeTimeline from "./ModeTimeline";
@@ -49,21 +47,21 @@ export default function CockpitPage() {
   }, [fetchAll, paused]);
 
   return (
-    <div className="space-y-3">
+    <div className="space-y-4 max-w-7xl mx-auto pb-10">
       {/* Top bar: title + controls */}
       <div className="flex items-center justify-between">
-        <h2 className="text-xl font-bold text-white">System Stability Cockpit</h2>
+        <h2 className="text-xl font-bold text-white tracking-tight">System Stability Cockpit</h2>
         <div className="flex items-center gap-3">
-          {error && <span className="text-xs text-red-400">{error}</span>}
+          {error && <span className="text-xs text-red-400 animate-pulse">{error}</span>}
           <button
             onClick={() => setPaused(!paused)}
-            className="flex items-center gap-1.5 rounded border border-[var(--border)] bg-[var(--card)] px-2 py-1 text-xs text-gray-400 hover:text-white transition-colors"
+            className="flex items-center gap-1.5 rounded border border-[var(--border)] bg-[var(--card)] px-3 py-1.5 text-xs text-gray-400 hover:text-white transition-all hover:bg-[var(--border)]"
           >
-            <Activity className="h-3 w-3" />
+            <Activity className={`h-3 w-3 ${paused ? "" : "animate-pulse"}`} />
             {paused ? "Resume" : "Pause"}
           </button>
-          <span className={`text-[10px] ${paused ? "text-yellow-400" : "text-green-400"}`}>
-            {paused ? "PAUSED" : `${POLL_INTERVAL / 1000}s polling`}
+          <span className={`text-[10px] font-mono font-bold tracking-widest ${paused ? "text-yellow-500" : "text-green-500"}`}>
+            {paused ? "PAUSED" : "LIVE"}
           </span>
         </div>
       </div>
@@ -71,50 +69,52 @@ export default function CockpitPage() {
       {/* 1. SYSTEM HEALTH HEADER — single source of truth */}
       <SystemHealthHeader overview={overview} instability={instability} explanation={explanation} />
 
-      {/* 2. SYSTEM NARRATIVE — one sentence */}
-      <SystemNarrative text={explanation?.transition_summary ?? null} />
-
-      {/* 3. PRIMARY SIGNAL — diagnosis, not analytics */}
-      <PrimarySignal data={instability} />
-
-      {/* 4. DECISION BANNER — action guidance */}
+      {/* 2. DECISION BANNER — action guidance */}
       <DecisionBanner data={instability} />
 
-      {/* 5. SYSTEM FORCES — collapsed macro signals */}
-      <details className="group">
-        <summary className="flex cursor-pointer items-center gap-2 rounded-lg border border-[var(--border)] bg-[var(--card)] px-4 py-2.5 text-sm text-gray-400 hover:text-white transition-colors [&::-webkit-details-marker]:hidden">
-          <ChevronRight className="h-3.5 w-3.5 text-gray-600 group-open:rotate-90 transition-transform" />
-          <span className="text-xs font-semibold text-gray-500 uppercase tracking-wider">System Forces</span>
-          <span className="text-[10px] text-gray-600">— 3 macro signals (pressure, stability, throughput)</span>
-        </summary>
-        <div className="mt-2">
-          <StabilityMetricsPanel overview={overview} instability={instability} />
-        </div>
-      </details>
+      <div className="grid grid-cols-1 gap-4 pt-4">
+        {/* 3. SYSTEM FORCES — collapsed macro signals */}
+        <details className="group" open>
+          <summary className="flex cursor-pointer items-center justify-between rounded-lg border border-[var(--border)] bg-[var(--card)] px-4 py-3 text-sm text-gray-400 hover:text-white transition-colors [&::-webkit-details-marker]:hidden">
+            <div className="flex items-center gap-2">
+              <ChevronRight className="h-4 w-4 text-gray-600 group-open:rotate-90 transition-transform" />
+              <span className="text-xs font-bold text-gray-500 uppercase tracking-widest">System Forces</span>
+            </div>
+            <span className="text-[10px] text-gray-600 font-medium">Pressure · Stability · Throughput</span>
+          </summary>
+          <div className="mt-3">
+            <StabilityMetricsPanel overview={overview} instability={instability} />
+          </div>
+        </details>
 
-      {/* 6. MODE TIMELINE — collapsed, for incident review */}
-      <details className="group">
-        <summary className="flex cursor-pointer items-center gap-2 rounded-lg border border-[var(--border)] bg-[var(--card)] px-4 py-2.5 text-sm text-gray-400 hover:text-white transition-colors [&::-webkit-details-marker]:hidden">
-          <ChevronRight className="h-3.5 w-3.5 text-gray-600 group-open:rotate-90 transition-transform" />
-          <span className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Mode Timeline</span>
-          <span className="text-[10px] text-gray-600">— transition history for incident review</span>
-        </summary>
-        <div className="mt-2">
-          <ModeTimeline data={overview?.recent_transitions ?? null} />
-        </div>
-      </details>
+        {/* 4. MODE TIMELINE — collapsed, for incident review */}
+        <details className="group">
+          <summary className="flex cursor-pointer items-center justify-between rounded-lg border border-[var(--border)] bg-[var(--card)] px-4 py-3 text-sm text-gray-400 hover:text-white transition-colors [&::-webkit-details-marker]:hidden">
+             <div className="flex items-center gap-2">
+              <ChevronRight className="h-4 w-4 text-gray-600 group-open:rotate-90 transition-transform" />
+              <span className="text-xs font-bold text-gray-500 uppercase tracking-widest">Transition History</span>
+            </div>
+            <span className="text-[10px] text-gray-600 font-medium">Mode shift audit log</span>
+          </summary>
+          <div className="mt-3">
+            <ModeTimeline data={overview?.recent_transitions ?? null} />
+          </div>
+        </details>
 
-      {/* 7. INCIDENT LAB — hidden simulation */}
-      <details className="group">
-        <summary className="flex cursor-pointer items-center gap-2 rounded-lg border border-[var(--border)] bg-[var(--card)] px-4 py-2.5 text-sm text-gray-400 hover:text-white transition-colors [&::-webkit-details-marker]:hidden">
-          <ChevronRight className="h-3.5 w-3.5 text-gray-600 group-open:rotate-90 transition-transform" />
-          <span className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Incident Lab</span>
-          <span className="text-[10px] text-gray-600">— stress simulation & what-if analysis</span>
-        </summary>
-        <div className="mt-2">
-          <StressSimulationPanel />
-        </div>
-      </details>
+        {/* 5. INCIDENT LAB — hidden simulation */}
+        <details className="group">
+          <summary className="flex cursor-pointer items-center justify-between rounded-lg border border-[var(--border)] bg-[var(--card)] px-4 py-3 text-sm text-gray-400 hover:text-white transition-colors [&::-webkit-details-marker]:hidden">
+            <div className="flex items-center gap-2">
+              <ChevronRight className="h-4 w-4 text-gray-600 group-open:rotate-90 transition-transform" />
+              <span className="text-xs font-bold text-gray-500 uppercase tracking-widest">Incident Lab</span>
+            </div>
+            <span className="text-[10px] text-gray-600 font-medium">Stress simulation & what-if</span>
+          </summary>
+          <div className="mt-3">
+            <StressSimulationPanel />
+          </div>
+        </details>
+      </div>
     </div>
   );
 }
