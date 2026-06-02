@@ -10,7 +10,7 @@ from app.schemas.trade import TradeCreateRequest
 from app.core.logging import logger
 from app.core.timing import record_latency
 from app.services.risk_service import RiskService
-from app.engines.paper_engine import PaperEngine
+from app.services.execution.execution_service import ExecutionService
 from app.services.integrity_service import IntegrityService
 from app.services.safety_service import SafetyService
 from app.core.exceptions import TradeExecutionError, MarketNotFoundError
@@ -25,7 +25,7 @@ class TradeService:
     def __init__(self, db: AsyncSession):
         self.db = db
         self.risk_service = RiskService(db)
-        self.paper_engine = PaperEngine(db)
+        self.execution_service = ExecutionService(db)
         self.safety_service = SafetyService(db)
         self._emergency_stop = False
         self.integrity = IntegrityService(db)
@@ -182,12 +182,8 @@ class TradeService:
             )
 
         if request.order_type == "market":
-            result = await self.paper_engine.execute_market_order(trade)
-            trade.status = result["status"]
-            trade.filled_size = result["filled_size"]
-            trade.filled_price = result["filled_price"]
-            trade.slippage = result["slippage"]
-            trade.fee = result["fee"]
+            await self.execution_service.create_trade_execution(trade)
+            trade.status = "open"
             trade.entry_timestamp = datetime.now(timezone.utc)
 
         await self.db.flush()
@@ -226,10 +222,10 @@ class TradeService:
         if trade.status not in ("open", "pending"):
             raise TradeExecutionError(f"Trade {trade_id} is {trade.status}, cannot close")
 
-        result = await self.paper_engine.close_position(trade, exit_price=exit_price)
-        trade.status = result["status"]
-        trade.pnl = result["pnl"]
-        trade.pnl_percent = result["pnl_percent"]
+        from decimal import Decimal
+        exit_dec = Decimal(str(exit_price)) if exit_price is not None else None
+        await self.execution_service.close_trade_execution(trade, exit_price=exit_dec)
+        trade.status = "closed"
         trade.exit_timestamp = datetime.now(timezone.utc)
         await self.db.flush()
         return trade

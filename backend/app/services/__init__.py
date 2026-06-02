@@ -12,6 +12,8 @@ from .strategy_service import StrategyService
 from .portfolio_service import PortfolioService
 from .strategy_ranking_service import StrategyRankingService
 from .execution_simulator import ExecutionSimulator
+from .execution.execution_service import ExecutionService
+from .execution.fill_handler import FillHandler
 from .regime_service import RegimeService
 from .safety_service import SafetyService
 from .event_bridge import EventPersistenceBridge
@@ -33,6 +35,8 @@ __all__ = [
     "PortfolioService",
     "StrategyRankingService",
     "ExecutionSimulator",
+    "ExecutionService",
+    "FillHandler",
     "RegimeService",
     "SafetyService",
     "EventPersistenceBridge",

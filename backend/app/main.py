@@ -27,6 +27,8 @@ from app.services.stress_test_engine import StressTestEngine
 from app.services.live_trading_state_machine import LiveTradingStateMachine
 from app.services.system_health_store import SystemHealthStore
 from app.core.system_mode import ModeManager, SystemMode, set_global_manager
+from app.workers.clob_fill_poller import CLOBFillPoller
+from app.workers.monitoring_worker import MonitoringWorker
 from app.api.system import set_mode_manager as _wire_mode_api
 
 
@@ -172,6 +174,27 @@ async def lifespan(app: FastAPI):
     _wire_mode_api(_mode_manager)
     bg_tasks.append(asyncio.create_task(_periodic_mode_evaluator(), name="mode_evaluator"))
     logger.info("mode_evaluator_started")
+
+    monitoring_worker = MonitoringWorker()
+    bg_tasks.append(asyncio.create_task(monitoring_worker.run(), name="monitoring_worker"))
+    logger.info("monitoring_worker_started")
+
+    # ── WebSocket Redis bridge ────────────────────────
+    bg_tasks.append(asyncio.create_task(_ws_redis_bridge(), name="ws_redis_bridge"))
+    logger.info("ws_redis_bridge_started")
+
+    # ── Alert registration ─────────────────────────────
+    from app.services.alerts.alert_service import alert_service as _alert_service
+    _alert_service.register_default_rules()
+    logger.info("alert_rules_registered")
+
+    if settings.TRADING_MODE == "live":
+        clob_poller = CLOBFillPoller(poll_interval=30)
+        bg_tasks.append(asyncio.create_task(clob_poller.run(), name="clob_fill_poller"))
+        logger.info("clob_fill_poller_started")
+
+        bg_tasks.append(asyncio.create_task(_periodic_live_reconciliation(), name="live_reconciliation"))
+        logger.info("live_reconciliation_started")
 
     yield
 
@@ -745,6 +768,47 @@ async def _periodic_reconciliation():
         except Exception as e:
             logger.warning("reconciliation_error", error=str(e))
         await asyncio.sleep(43200)
+
+
+async def _ws_redis_bridge():
+    import asyncio
+    import json
+    from app.redis import get_redis
+    from app.ws.manager import manager
+    from app.core.events import EventBus
+
+    channels = [
+        "dashboard:markets", "dashboard:whales", "dashboard:signals",
+        "dashboard:trades", "telegram:alerts",
+    ]
+
+    await asyncio.sleep(5)
+    while True:
+        try:
+            r = await get_redis()
+            pubsub = r.pubsub()
+            await pubsub.subscribe(*channels)
+            async for msg in pubsub.listen():
+                if msg["type"] != "message":
+                    continue
+                try:
+                    event = json.loads(msg["data"])
+                    channel_map = {
+                        "dashboard:markets": "portfolio",
+                        "dashboard:whales": "monitoring",
+                        "dashboard:signals": "monitoring",
+                        "dashboard:trades": "trades",
+                        "telegram:alerts": "alerts",
+                    }
+                    ws_channel = channel_map.get(msg["channel"], "monitoring")
+                    await manager.broadcast_event(event, channels=[ws_channel])
+                except json.JSONDecodeError:
+                    continue
+        except asyncio.CancelledError:
+            break
+        except Exception as e:
+            logger.warning("ws_redis_bridge_error", error=str(e))
+            await asyncio.sleep(10)
 
 
 app = FastAPI(
@@ -3226,6 +3290,25 @@ async def _periodic_mode_evaluator():
             logger.warning("mode_evaluator_error", error=str(e))
 
 
+async def _periodic_live_reconciliation():
+    from app.database import async_session_factory
+    import asyncio
+
+    await asyncio.sleep(60)
+    while True:
+        try:
+            async with async_session_factory() as db:
+                from app.services.execution.reconciliation_service import ReconciliationService
+                svc = ReconciliationService(db)
+                await svc.reconcile_all_submitted()
+                await db.commit()
+        except asyncio.CancelledError:
+            break
+        except Exception as e:
+            logger.warning("live_reconciliation_error", error=str(e))
+        await asyncio.sleep(300)
+
+
 # ── Mode debug endpoints ─────────────────────────────
 
 @app.get("/debug/mode/status")
@@ -3282,3 +3365,9 @@ async def debug_mode_toggle_recording():
 # Import and include routers
 from app.api.router import router as api_router
 app.include_router(api_router, prefix="/api/v1")
+
+# ── WebSocket Gateway ──────────────────────────────────
+from app.ws.gateway import ws_router
+app.include_router(ws_router)
+logger.info("ws_gateway_mounted")
+logger.info("alert_service_initialized")

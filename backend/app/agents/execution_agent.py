@@ -2,13 +2,14 @@ import asyncio
 from uuid import UUID
 
 from sqlalchemy import select
+from sqlalchemy.orm import selectinload
 
 from app.agents.base import BaseAgent
 from app.core.events import EventBus
 from app.core.logging import logger
 from app.core.timing import record_latency
 from app.database import async_session_factory
-from app.models import Trade
+from app.models import Trade, ExchangeOrder
 from app.services.trade_service import TradeService, FORCE_TRADING_DISABLED, MICRO_LIVE_SAFE_MODE
 from app.schemas.trade import TradeCreateRequest
 from app.services.invariant_guard import validate_signal_fields, dead_letter_signals
@@ -212,8 +213,24 @@ class ExecutionAgent(BaseAgent):
                 trade = await service.create_trade(request)
                 from app.services.pipeline_metrics import inc_execution_success, record_slippage
                 await inc_execution_success()
-                if trade.slippage:
-                    await record_slippage(float(trade.slippage))
+
+                result = await db.execute(
+                    select(Trade).where(Trade.id == trade.id).options(
+                        selectinload(Trade.orders).selectinload(ExchangeOrder.fills)
+                    )
+                )
+                loaded_trade = result.scalar_one()
+
+                exec_order = loaded_trade.orders[0] if loaded_trade.orders else None
+                fill = exec_order.fills[0] if exec_order and exec_order.fills else None
+
+                filled_size = float(exec_order.filled_size) if exec_order and exec_order.filled_size else 0
+                filled_price = float(exec_order.filled_price) if exec_order and exec_order.filled_price else 0
+                slippage_val = float(exec_order.slippage) if exec_order and exec_order.slippage else 0
+                fee_val = float(fill.fee) if fill and fill.fee else 0
+
+                if slippage_val > 0:
+                    await record_slippage(slippage_val)
                 await EventBus.publish(
                     "trade:execution",
                     "trade.executed",
@@ -228,11 +245,11 @@ class ExecutionAgent(BaseAgent):
                         "side": side,
                         "outcome": outcome,
                         "size": trade.size,
-                        "filled_size": float(trade.filled_size or 0),
-                        "filled_price": float(trade.filled_price or 0),
-                        "price": float(trade.filled_price or 0),
-                        "slippage": float(trade.slippage or 0),
-                        "fee": float(trade.fee or 0),
+                        "filled_size": filled_size,
+                        "filled_price": filled_price,
+                        "price": filled_price,
+                        "slippage": slippage_val,
+                        "fee": fee_val,
                     },
                     correlation_id=correlation_id,
                 )

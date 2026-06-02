@@ -1,6 +1,9 @@
 from fastapi import APIRouter
 
-from app.api import health, markets, wallets, signals, trades, agents, strategies, portfolio, execution, backtesting, analytics, attribution, trace, system, cockpit
+from app.api import health, markets, wallets, signals, trades, agents, strategies, execution, backtesting, analytics, attribution, trace, system, cockpit
+from app.api.monitoring import execution_routes as monitoring_routes
+from app.api.portfolio import router as portfolio_router
+from app.api import events as events_router
 
 router = APIRouter()
 
@@ -11,7 +14,7 @@ router.include_router(signals.router, prefix="/signals", tags=["signals"])
 router.include_router(trades.router, prefix="/trades", tags=["trades"])
 router.include_router(agents.router, prefix="/agents", tags=["agents"])
 router.include_router(strategies.router, prefix="/strategies", tags=["strategies"])
-router.include_router(portfolio.router, prefix="/portfolio", tags=["portfolio"])
+router.include_router(portfolio_router, prefix="/portfolio", tags=["portfolio"])
 router.include_router(execution.router, prefix="/execution", tags=["execution"])
 router.include_router(backtesting.router, prefix="/backtesting", tags=["backtesting"])
 router.include_router(analytics.router, prefix="/analytics", tags=["analytics"])
@@ -19,3 +22,5 @@ router.include_router(attribution.router, prefix="/attribution", tags=["attribut
 router.include_router(trace.router, prefix="/trace", tags=["trace"])
 router.include_router(system.router, prefix="/system", tags=["system"])
 router.include_router(cockpit.router, prefix="/cockpit", tags=["cockpit"])
+router.include_router(monitoring_routes.router, prefix="/monitoring", tags=["monitoring"])
+router.include_router(events_router.router, prefix="/events", tags=["events"])

@@ -7,11 +7,59 @@ from sqlalchemy import select, desc, func, and_
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import Position, PortfolioSnapshot, MarketCorrelation, Market, SignalOutcome, PortfolioAuditLog
+from app.models.fill import Fill
 
 
 class PortfolioService:
     def __init__(self, db: AsyncSession):
         self.db = db
+
+    async def upsert_from_fill(self, fill: Fill):
+        from sqlalchemy import select
+
+        direction = fill.side.upper()
+
+        result = await self.db.execute(
+            select(Position).where(
+                Position.market_id == fill.market_id,
+                Position.status == "OPEN",
+            ).limit(1)
+        )
+        pos = result.scalar_one_or_none()
+
+        if not pos:
+            pos = Position(
+                market_id=fill.market_id,
+                direction=direction,
+                size=float(fill.size),
+                entry_price=float(fill.price),
+                current_price=float(fill.price),
+                status="OPEN",
+                opened_at=fill.filled_at,
+            )
+            self.db.add(pos)
+        else:
+            if direction == pos.direction:
+                total_cost = float(pos.size) * float(pos.entry_price) + float(fill.size) * float(fill.price)
+                new_size = float(pos.size) + float(fill.size)
+                pos.entry_price = total_cost / new_size if new_size > 0 else pos.entry_price
+                pos.size = new_size
+            else:
+                new_size = float(pos.size) - float(fill.size)
+                if new_size <= 0:
+                    if pos.direction == "BUY":
+                        pos.realized_pnl = (float(fill.price) - float(pos.entry_price)) * float(pos.size)
+                    else:
+                        pos.realized_pnl = (float(pos.entry_price) - float(fill.price)) * float(pos.size)
+                    pos.status = "CLOSED"
+                    pos.size = 0
+                    pos.closed_at = fill.filled_at
+                else:
+                    pos.size = new_size
+
+            pos.current_price = float(fill.price)
+
+        await self.db.flush()
 
     async def open_position(
         self,

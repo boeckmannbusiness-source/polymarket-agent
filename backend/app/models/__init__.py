@@ -17,6 +17,8 @@ from .system_mode import SystemModeTransition
 from .remote_audit import RemoteControlAudit
 from .portfolio_audit_log import PortfolioAuditLog
 from .benchmark_price import BenchmarkPrice
+from .exchange_order import ExchangeOrder
+from .fill import Fill
 
 __all__ = [
     "Market",
@@ -47,4 +49,6 @@ __all__ = [
     "RemoteControlAudit",
     "PortfolioAuditLog",
     "BenchmarkPrice",
+    "ExchangeOrder",
+    "Fill",
 ]

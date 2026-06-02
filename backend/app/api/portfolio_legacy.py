@@ -11,12 +11,6 @@ from app.services.strategy_ranking_service import StrategyRankingService
 router = APIRouter()
 
 
-@router.get("/summary")
-async def get_portfolio_summary(db: AsyncSession = Depends(get_db)):
-    service = PortfolioService(db)
-    return await service.get_portfolio_summary()
-
-
 @router.get("/history")
 async def get_portfolio_history(hours: int = Query(168, ge=1, le=8760), db: AsyncSession = Depends(get_db)):
     service = PortfolioService(db)
@@ -48,41 +42,6 @@ async def take_portfolio_snapshot(db: AsyncSession = Depends(get_db)):
         "drawdown": float(snap.drawdown) if snap.drawdown else 0,
         "timestamp": snap.timestamp.isoformat(),
     }
-
-
-@router.get("/positions")
-async def get_positions(
-    status: str | None = Query(default=None, pattern="^(OPEN|CLOSED)?$"),
-    strategy: str | None = None,
-    db: AsyncSession = Depends(get_db),
-):
-    service = PortfolioService(db)
-    if status == "OPEN":
-        positions = await service.get_open_positions(strategy_name=strategy)
-    else:
-        positions = await service.get_position_history(limit=100)
-        if strategy:
-            positions = [p for p in positions if p.strategy_name == strategy]
-        if status == "CLOSED":
-            positions = [p for p in positions if p.status == "CLOSED"]
-
-    return [
-        {
-            "id": str(p.id),
-            "market_condition_id": p.market_condition_id,
-            "direction": p.direction,
-            "size": float(p.size),
-            "entry_price": float(p.entry_price),
-            "current_price": float(p.current_price) if p.current_price else None,
-            "unrealized_pnl": float(p.unrealized_pnl) if p.unrealized_pnl else 0,
-            "realized_pnl": float(p.realized_pnl) if p.realized_pnl else 0,
-            "status": p.status,
-            "strategy": p.strategy_name,
-            "opened_at": p.opened_at.isoformat() if p.opened_at else None,
-            "closed_at": p.closed_at.isoformat() if p.closed_at else None,
-        }
-        for p in positions
-    ]
 
 
 @router.post("/positions")

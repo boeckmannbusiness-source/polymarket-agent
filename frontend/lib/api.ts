@@ -283,6 +283,22 @@ export const api = {
   portfolio: {
     summary: () => fetchAPI<any>("/portfolio/summary"),
     history: (hours = 168) => fetchAPI<any[]>(`/portfolio/history?hours=${hours}`),
+    positions: (status?: string) =>
+      fetchAPI<any[]>(`/portfolio/positions${status ? `?status=${status}` : ""}`),
+    strategies: () => fetchAPI<any[]>("/portfolio/strategies"),
+    strategyDetail: (agentId: string) => fetchAPI<any>(`/portfolio/strategies/${agentId}`),
+    strategyPnlCurve: (agentId: string) => fetchAPI<any[]>(`/portfolio/strategies/${agentId}/pnl-curve`),
+    tradeTimeline: (tradeId: string) => fetchAPI<any>(`/portfolio/trades/${tradeId}/timeline`),
+    exposure: () => fetchAPI<any>("/portfolio/exposure"),
+  },
+
+  // Monitoring
+  monitoring: {
+    tradeMetrics: (tradeId: string) => fetchAPI<any>(`/monitoring/trades/${tradeId}`),
+    orderMetrics: (orderId: string) => fetchAPI<any>(`/monitoring/orders/${orderId}`),
+    positionMetrics: (marketId: string) => fetchAPI<any>(`/monitoring/positions/${marketId}`),
+    portfolioMetrics: () => fetchAPI<any>("/monitoring/portfolio"),
+    strategyMetrics: (agentId: string) => fetchAPI<any>(`/monitoring/strategy/${agentId}`),
   },
 
   // Analytics
