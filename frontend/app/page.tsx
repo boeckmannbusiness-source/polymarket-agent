@@ -5,12 +5,21 @@ import { api, Market, Wallet, Signal, Trade } from "@/lib/api";
 import { formatPnl, formatPercent, formatNumber, confidenceColor } from "@/lib/utils";
 import {
   AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
-  BarChart, Bar, Cell, PieChart, Pie
+  BarChart, Bar, Cell,
 } from 'recharts';
 import {
   ShieldCheck, AlertTriangle, Activity, TrendingUp,
-  DollarSign, PieChart as PieChartIcon, ArrowRightLeft
+  DollarSign, PieChart as PieChartIcon, ArrowRightLeft, Play, Square, Cpu
 } from "lucide-react";
+
+const MODE_COLORS: Record<string, string> = {
+  normal: "#00C853", degraded: "#FFD600", protected: "#FF9800",
+  read_only: "#9C27B0", emergency_stop: "#FF1744",
+};
+const MODE_LABELS: Record<string, string> = {
+  normal: "Normal", degraded: "Degraded", protected: "Protected",
+  read_only: "Read Only", emergency_stop: "Emergency Stop",
+};
 
 export default function PMDashboard() {
   const [summary, setSummary] = useState<any>(null);
@@ -18,23 +27,33 @@ export default function PMDashboard() {
   const [status, setStatus] = useState<any>(null);
   const [rankings, setRankings] = useState<any[]>([]);
   const [slippage, setSlippage] = useState<any>(null);
+  const [systemMode, setSystemMode] = useState<any>(null);
   const [loading, setLoading] = useState(true);
+  const [ksLoading, setKsLoading] = useState(false);
+
+  // Simulation state
+  const [strategyNames, setStrategyNames] = useState<string[]>([]);
+  const [selectedStrategy, setSelectedStrategy] = useState("");
+  const [simResult, setSimResult] = useState<any>(null);
+  const [simLoading, setSimLoading] = useState(false);
 
   useEffect(() => {
     async function load() {
       try {
-        const [summ, hist, stat, ranks, slip] = await Promise.all([
+        const [summ, hist, stat, ranks, slip, mode] = await Promise.all([
           api.portfolio.summary(),
           api.portfolio.history(168),
           api.health.status(),
           api.analytics.strategySummary(7),
-          api.analytics.slippageSummary(7)
+          api.analytics.slippageSummary(7),
+          api.system.mode().catch(() => null),
         ]);
         setSummary(summ);
         setHistory(hist);
         setStatus(stat);
         setRankings(ranks.rankings || []);
         setSlippage(slip);
+        setSystemMode(mode);
       } catch (e) {
         console.error("Failed to load PM dashboard data", e);
       } finally {
@@ -42,7 +61,38 @@ export default function PMDashboard() {
       }
     }
     load();
+    api.strategies.names().then(r => {
+      setStrategyNames(r.strategies || []);
+      if (r.strategies?.length) setSelectedStrategy(r.strategies[0]);
+    }).catch(() => {});
   }, []);
+
+  const killSwitchActive = status?.metrics?.kill_switch_active ?? false;
+
+  async function toggleKillSwitch() {
+    setKsLoading(true);
+    try {
+      await api.execution.killSwitch();
+      const fresh = await api.health.status();
+      setStatus(fresh);
+    } catch (e) {
+      console.error("Kill switch failed", e);
+    }
+    setKsLoading(false);
+  }
+
+  async function runSimulation() {
+    if (!selectedStrategy) return;
+    setSimLoading(true);
+    setSimResult(null);
+    try {
+      const result = await api.backtesting.simulate(selectedStrategy);
+      setSimResult(result);
+    } catch (e) {
+      console.error("Simulation failed", e);
+    }
+    setSimLoading(false);
+  }
 
   if (loading) {
     return (
@@ -58,18 +108,20 @@ export default function PMDashboard() {
   const chartData = history.map(h => ({
     time: new Date(h.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
     value: h.portfolio_value,
-    pnl: h.total_realized_pnl + h.total_unrealized_pnl
+    pnl: h.total_realized_pnl + h.total_unrealized_pnl,
   }));
 
   const strategyData = rankings.slice(0, 5).map(r => ({
     name: r.strategy,
     pnl: r.total_pnl,
-    winRate: r.win_rate
+    winRate: r.win_rate,
   }));
+
+  const modeColor = MODE_COLORS[systemMode?.mode] || "#888";
+  const modeLabel = MODE_LABELS[systemMode?.mode] || (systemMode?.mode || "").toUpperCase();
 
   return (
     <div className="min-h-screen bg-black text-gray-300 p-4 md:p-6 font-sans pb-12 md:pb-6">
-      {/* 1. Header: The Shock Test */}
       <header className="mb-6 md:mb-8 flex flex-col md:flex-row md:items-end justify-between border-b border-gray-900 pb-6 gap-4">
         <div>
           <div className="text-[10px] md:text-xs font-semibold text-gray-500 uppercase tracking-widest mb-1">Net Liquidation Value</div>
@@ -82,28 +134,29 @@ export default function PMDashboard() {
             </span>
           </div>
         </div>
-
-        <div className="flex gap-6 md:gap-8 justify-between md:justify-end">
+        <div className="flex gap-4 md:gap-6 items-center flex-wrap justify-between md:justify-end">
           <div className="text-left md:text-right">
             <div className="text-[10px] font-bold text-gray-600 uppercase tracking-widest mb-1">Drawdown</div>
             <div className="text-lg md:text-xl font-mono text-rose-500 font-bold">
               -{formatPercent(summary?.drawdown || 0)}
             </div>
           </div>
-          <div className="text-right">
-            <div className="text-[10px] font-bold text-gray-600 uppercase tracking-widest mb-1">Health</div>
-            <div className="flex items-center gap-2 justify-end">
-              <span className={`h-2.5 w-2.5 rounded-full ${status?.status === 'healthy' ? 'bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.5)]' : 'bg-amber-500 shadow-[0_0_8px_rgba(251,191,36,0.5)]'}`} />
-              <span className="text-xs md:text-sm font-bold text-white uppercase">{status?.status || 'UNKNOWN'}</span>
-            </div>
+          <div className="flex items-center gap-2">
+            <span className={`h-2.5 w-2.5 rounded-full ${status?.status === 'healthy' ? 'bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.5)]' : 'bg-amber-500 shadow-[0_0_8px_rgba(251,191,36,0.5)]'}`} />
+            <span className="text-xs md:text-sm font-bold text-white uppercase">{status?.status || 'UNKNOWN'}</span>
           </div>
+          {systemMode && (
+            <div className="flex items-center gap-1.5 rounded-md border px-2 py-1" style={{ borderColor: modeColor + '40', backgroundColor: modeColor + '10' }}>
+              <span className="h-2 w-2 rounded-full" style={{ backgroundColor: modeColor }} />
+              <span className="text-[10px] md:text-xs font-bold uppercase tracking-wider" style={{ color: modeColor }}>{modeLabel}</span>
+            </div>
+          )}
         </div>
       </header>
 
-      {/* 2. Main Body: Diagnostic Logic */}
       <div className="grid grid-cols-1 md:grid-cols-12 gap-6">
 
-        {/* Equity Curve centerpiece */}
+        {/* Equity Curve */}
         <section className="col-span-1 md:col-span-8 rounded-xl border border-gray-900 bg-[#050505] p-4 md:p-6">
           <div className="flex items-center justify-between mb-8">
             <h3 className="flex items-center gap-2 text-[10px] md:text-sm font-bold text-gray-400 uppercase tracking-widest">
@@ -130,63 +183,61 @@ export default function PMDashboard() {
                 <CartesianGrid strokeDasharray="3 3" stroke="#111" vertical={false} />
                 <XAxis dataKey="time" stroke="#444" fontSize={10} tickLine={false} axisLine={false} />
                 <YAxis stroke="#444" fontSize={10} tickLine={false} axisLine={false} tickFormatter={(v) => `$${formatNumber(v)}`} />
-                <Tooltip
-                  contentStyle={{ backgroundColor: '#000', border: '1px solid #222', borderRadius: '8px', fontSize: '12px' }}
-                  itemStyle={{ color: '#fff' }}
-                />
+                <Tooltip contentStyle={{ backgroundColor: '#000', border: '1px solid #222', borderRadius: '8px', fontSize: '12px' }} itemStyle={{ color: '#fff' }} />
                 <Area type="monotone" dataKey="value" stroke="#6366f1" strokeWidth={2} fillOpacity={1} fill="url(#colorValue)" />
               </AreaChart>
             </ResponsiveContainer>
           </div>
         </section>
 
-        {/* Risk & Utilization */}
+        {/* Portfolio Stats + Kill Switch */}
         <section className="col-span-1 md:col-span-4 space-y-6">
           <div className="rounded-xl border border-gray-900 bg-[#050505] p-6">
             <h3 className="flex items-center gap-2 text-[10px] md:text-sm font-bold text-gray-400 uppercase tracking-widest mb-6">
               <ShieldCheck className="h-4 w-4" />
-              Deployment
+              Portfolio
             </h3>
-            <div className="flex flex-col items-center">
-              <div className="relative h-32 w-32 md:h-40 md:w-40">
-                <div className="absolute inset-0 rounded-full border-[10px] md:border-[12px] border-gray-900" />
-                <div
-                  className="absolute inset-0 rounded-full border-[10px] md:border-[12px] border-indigo-500"
-                  style={{
-                    clipPath: `polygon(50% 50%, 50% 0%, ${50 + 50 * Math.sin(2 * Math.PI * (Math.min(100, (summary?.total_exposure || 0) / 10000))) } % ${50 - 50 * Math.cos(2 * Math.PI * (Math.min(100, (summary?.total_exposure || 0) / 10000))) } %, 100% 0%, 100% 100%, 0% 100%, 0% 0%)`,
-                    transform: 'rotate(0deg)'
-                  }}
-                />
-                <div className="absolute inset-0 flex flex-col items-center justify-center">
-                  <span className="text-2xl md:text-3xl font-bold text-white">{Math.min(100, (summary?.total_exposure || 0) / 100).toFixed(1)}%</span>
-                  <span className="text-[8px] md:text-[10px] text-gray-600 font-bold uppercase">Utilized</span>
-                </div>
+            <div className="space-y-4">
+              <div className="flex justify-between text-sm">
+                <span className="text-gray-500">Gross Exposure</span>
+                <span className="text-white font-mono">${formatNumber(summary?.total_exposure || 0)}</span>
               </div>
-              <div className="mt-6 w-full space-y-3">
-                <div className="flex justify-between text-xs">
-                  <span className="text-gray-500">Gross Exposure</span>
-                  <span className="text-white font-mono">${formatNumber(summary?.total_exposure || 0)}</span>
-                </div>
-                <div className="flex justify-between text-xs">
-                  <span className="text-gray-500">Positions</span>
-                  <span className="text-white font-mono">{summary?.open_positions}</span>
-                </div>
+              <div className="flex justify-between text-sm">
+                <span className="text-gray-500">Cash Balance</span>
+                <span className="text-white font-mono">${formatNumber(summary?.cash_balance || 0)}</span>
+              </div>
+              <div className="flex justify-between text-sm">
+                <span className="text-gray-500">Positions</span>
+                <span className="text-white font-mono">{summary?.open_positions || 0}</span>
+              </div>
+              <div className="flex justify-between text-sm">
+                <span className="text-gray-500">Active Strategies</span>
+                <span className="text-white font-mono">{status?.metrics?.active_strategies || 0}</span>
               </div>
             </div>
           </div>
 
-          <div className="rounded-xl border border-rose-900/30 bg-rose-950/5 p-4 flex items-center justify-between">
+          <div className={`rounded-xl border p-4 flex items-center justify-between ${killSwitchActive ? 'border-rose-900/30 bg-rose-950/5' : 'border-emerald-900/30 bg-emerald-950/5'}`}>
             <div className="flex items-center gap-3">
-              <div className="rounded-full bg-rose-500/10 p-2 text-rose-500">
+              <div className={`rounded-full p-2 ${killSwitchActive ? 'bg-rose-500/10 text-rose-500' : 'bg-emerald-500/10 text-emerald-500'}`}>
                 <AlertTriangle className="h-5 w-5" />
               </div>
               <div>
-                <div className="text-[10px] font-bold text-rose-500/50 uppercase tracking-widest">Emergency</div>
-                <div className="text-sm font-bold text-rose-200">Kill-Switch</div>
+                <div className="text-[10px] font-bold text-gray-500 uppercase tracking-widest">Emergency</div>
+                <div className="text-sm font-bold text-white">Kill-Switch</div>
+                <div className="text-[10px] mt-0.5 font-mono">{killSwitchActive ? 'TRADING HALTED' : 'Active — Trading'}</div>
               </div>
             </div>
-            <button className="rounded bg-rose-600 px-4 py-2 text-xs font-bold text-white hover:bg-rose-500 transition-colors">
-              HALT
+            <button
+              onClick={toggleKillSwitch}
+              disabled={ksLoading}
+              className={`rounded px-4 py-2 text-xs font-bold text-white transition-colors ${
+                killSwitchActive
+                  ? 'bg-emerald-600 hover:bg-emerald-500'
+                  : 'bg-rose-600 hover:bg-rose-500'
+              } disabled:opacity-50`}
+            >
+              {ksLoading ? '...' : killSwitchActive ? 'RESUME' : 'HALT'}
             </button>
           </div>
         </section>
@@ -223,7 +274,7 @@ export default function PMDashboard() {
             <div className="space-y-6 mt-4">
               <div className="flex items-center justify-between border-b border-gray-900 pb-4">
                 <span className="text-sm text-gray-500">Slippage (7D)</span>
-                <span className="text-xl font-mono text-white">{( (slippage?.avg_slippage || 0) * 100 ).toFixed(4)}%</span>
+                <span className="text-xl font-mono text-white">{((slippage?.avg_slippage || 0) * 100).toFixed(4)}%</span>
               </div>
               <div className="flex items-center justify-between border-b border-gray-900 pb-4">
                 <span className="text-sm text-gray-500">Trades (7D)</span>
@@ -242,7 +293,7 @@ export default function PMDashboard() {
               Exposure
             </h3>
             <div className="space-y-3">
-              {summary?.positions?.slice(0, 4).map((p: any) => (
+              {(summary?.positions || []).slice(0, 4).map((p: any) => (
                 <div key={p.id} className="flex items-center justify-between p-2 rounded hover:bg-gray-900/50 transition-colors">
                   <div className="min-w-0">
                     <div className="text-xs font-bold text-white truncate">{p.market_condition_id}</div>
@@ -260,9 +311,65 @@ export default function PMDashboard() {
           </div>
         </section>
 
+        {/* Strategy Simulation Panel */}
+        <section className="col-span-1 md:col-span-12 rounded-xl border border-gray-900 bg-[#050505] p-6">
+          <h3 className="flex items-center gap-2 text-[10px] md:text-sm font-bold text-gray-400 uppercase tracking-widest mb-4">
+            <Cpu className="h-4 w-4" />
+            Strategy Simulation
+          </h3>
+          <div className="flex flex-wrap items-end gap-4">
+            <div>
+              <label className="block text-[10px] text-gray-600 uppercase tracking-wider mb-1">Strategy</label>
+              <select
+                value={selectedStrategy}
+                onChange={(e) => setSelectedStrategy(e.target.value)}
+                className="rounded border border-gray-800 bg-gray-900 px-3 py-2 text-sm text-white focus:outline-none focus:border-gray-600"
+              >
+                {strategyNames.map((name) => (
+                  <option key={name} value={name}>{name}</option>
+                ))}
+              </select>
+            </div>
+            <button
+              onClick={runSimulation}
+              disabled={simLoading || !selectedStrategy}
+              className="flex items-center gap-2 rounded bg-indigo-600 px-4 py-2 text-xs font-bold text-white hover:bg-indigo-500 disabled:opacity-50 transition-colors"
+            >
+              {simLoading ? <Activity className="h-3 w-3 animate-spin" /> : <Play className="h-3 w-3" />}
+              {simLoading ? 'Running...' : 'Run Simulation'}
+            </button>
+          </div>
+
+          {simResult && (
+            <div className="mt-6 grid grid-cols-2 md:grid-cols-5 gap-4">
+              <div className="rounded-lg border border-gray-800 bg-gray-900/50 p-3">
+                <div className="text-[10px] text-gray-500 uppercase tracking-wider">Total P&L</div>
+                <div className={`text-lg font-bold font-mono mt-1 ${(simResult.metrics?.total_pnl || 0) >= 0 ? 'text-emerald-500' : 'text-rose-500'}`}>
+                  {formatPnl(simResult.metrics?.total_pnl || 0)}
+                </div>
+              </div>
+              <div className="rounded-lg border border-gray-800 bg-gray-900/50 p-3">
+                <div className="text-[10px] text-gray-500 uppercase tracking-wider">Win Rate</div>
+                <div className="text-lg font-bold font-mono mt-1 text-white">{((simResult.metrics?.win_rate || 0) * 100).toFixed(1)}%</div>
+              </div>
+              <div className="rounded-lg border border-gray-800 bg-gray-900/50 p-3">
+                <div className="text-[10px] text-gray-500 uppercase tracking-wider">Sharpe</div>
+                <div className="text-lg font-bold font-mono mt-1 text-white">{(simResult.metrics?.sharpe_ratio || 0).toFixed(2)}</div>
+              </div>
+              <div className="rounded-lg border border-gray-800 bg-gray-900/50 p-3">
+                <div className="text-[10px] text-gray-500 uppercase tracking-wider">Max Drawdown</div>
+                <div className="text-lg font-bold font-mono mt-1 text-rose-500">{((simResult.metrics?.max_drawdown || 0) * 100).toFixed(1)}%</div>
+              </div>
+              <div className="rounded-lg border border-gray-800 bg-gray-900/50 p-3">
+                <div className="text-[10px] text-gray-500 uppercase tracking-wider">Trades</div>
+                <div className="text-lg font-bold font-mono mt-1 text-white">{simResult.metrics?.total_trades || 0}</div>
+              </div>
+            </div>
+          )}
+        </section>
+
       </div>
 
-      {/* Persistent Bottom Status */}
       <footer className="fixed bottom-0 left-0 right-0 border-t border-gray-900 bg-black/80 backdrop-blur-md px-6 py-2 flex items-center justify-between text-[8px] md:text-[10px] font-bold text-gray-600 uppercase tracking-[0.2em]">
         <div className="flex items-center gap-4">
           <span className="hidden md:inline">Last Update: {status?.timestamp ? new Date(status.timestamp).toLocaleTimeString() : '---'}</span>
@@ -270,7 +377,7 @@ export default function PMDashboard() {
           <span>Env: PROD</span>
         </div>
         <div className="flex items-center gap-4">
-          <span className="text-emerald-500/50">Live</span>
+          <span className={`${killSwitchActive ? 'text-rose-500/50' : 'text-emerald-500/50'}`}>{killSwitchActive ? 'HALTED' : 'Live'}</span>
           <span className="hidden md:inline">© 2024 PI Agent</span>
         </div>
       </footer>

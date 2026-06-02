@@ -178,6 +178,36 @@ export interface ModeDebugStatus {
   ttl_seconds: number | null;
 }
 
+// ── System / Control types ──────────────────────────
+
+export interface SystemMode {
+  mode: string;
+  reason: string;
+  is_manual_override: boolean;
+  operator: string;
+  updated_at: string;
+  ttl_seconds: number | null;
+}
+
+export interface KillSwitchResponse {
+  kill_switch: boolean;
+  message: string;
+}
+
+export interface SimulationResult {
+  id: string;
+  strategy: string;
+  status: string;
+  metrics: {
+    total_pnl: number;
+    win_rate: number;
+    sharpe_ratio: number;
+    max_drawdown: number;
+    total_trades: number;
+  };
+  trades: any[];
+}
+
 export const api = {
   // Markets
   markets: {
@@ -259,5 +289,29 @@ export const api = {
   analytics: {
     strategySummary: (days = 7) => fetchAPI<any>(`/analytics/strategy-summary?days=${days}`),
     slippageSummary: (days = 7) => fetchAPI<any>(`/analytics/slippage-summary?days=${days}`),
+  },
+
+  // System mode
+  system: {
+    mode: () => fetchAPI<SystemMode>("/system/mode"),
+  },
+
+  // Execution control
+  execution: {
+    killSwitch: () =>
+      fetchAPI<KillSwitchResponse>("/execution/safety/kill-switch", { method: "POST" }),
+    emergencyStop: () =>
+      fetchAPI<{ status: string; closed_count: number }>("/execution/emergency/close-all", { method: "POST" }),
+  },
+
+  // Backtesting / simulation
+  backtesting: {
+    simulate: (strategy: string) =>
+      fetchAPI<SimulationResult>(`/backtesting/strategies/${strategy}/simulate`, { method: "POST" }),
+  },
+
+  // Strategy names (for simulation dropdown)
+  strategies: {
+    names: () => fetchAPI<{ strategies: string[] }>("/strategies/names"),
   },
 };
