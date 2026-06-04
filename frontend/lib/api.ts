@@ -180,6 +180,16 @@ export interface ModeDebugStatus {
 
 // ── System / Control types ──────────────────────────
 
+export interface RedisStatus {
+  used_memory_mb: number;
+  peak_memory_mb: number;
+  maxmemory_mb: number;
+  utilization_percent: number;
+  key_count: number;
+  keys_with_expiry: number;
+  avg_ttl_seconds: number;
+}
+
 export interface SystemMode {
   mode: string;
   reason: string;
@@ -310,6 +320,7 @@ export const api = {
   // System mode
   system: {
     mode: () => fetchAPI<SystemMode>("/system/mode"),
+    redis: () => fetchAPI<RedisStatus>("/system/redis"),
   },
 
   // Execution control
@@ -329,5 +340,77 @@ export const api = {
   // Strategy names (for simulation dropdown)
   strategies: {
     names: () => fetchAPI<{ strategies: string[] }>("/strategies/names"),
+  },
+
+  // ── Shadow Trading ─────────────────────────────
+  shadow: {
+    executions: (params?: { status?: string; strategy?: string; market_id?: string }) => {
+      const search = new URLSearchParams();
+      if (params?.status) search.set("status", params.status);
+      if (params?.strategy) search.set("strategy", params.strategy);
+      if (params?.market_id) search.set("market_id", params.market_id);
+      return fetchAPI<any>(`/shadow/executions?${search}`);
+    },
+    getExecution: (id: string) => fetchAPI<any>(`/shadow/executions/${id}`),
+    sync: () => fetchAPI<{ created: number; skipped: number; total_signals: number }>("/shadow/sync", { method: "POST" }),
+    refreshPrices: () => fetchAPI<{ updated: number; closed: number }>("/shadow/refresh-prices", { method: "POST" }),
+    strategies: () => fetchAPI<{ strategies: any[] }>("/shadow/strategies"),
+    performance: () => fetchAPI<any>("/shadow/performance"),
+    analytics: (params?: { start?: string; end?: string }) => {
+      const search = new URLSearchParams();
+      if (params?.start) search.set("start", params.start);
+      if (params?.end) search.set("end", params.end);
+      return fetchAPI<{ analytics: any[] }>(`/shadow/analytics?${search}`);
+    },
+    strategyAnalytics: (strategy: string, params?: { start?: string; end?: string }) => {
+      const search = new URLSearchParams();
+      if (params?.start) search.set("start", params.start);
+      if (params?.end) search.set("end", params.end);
+      return fetchAPI<any>(`/shadow/analytics/${strategy}?${search}`);
+    },
+    benchmarks: () => fetchAPI<{ benchmarks: any[] }>("/shadow/benchmarks"),
+    promotions: () => fetchAPI<{ promotions: any[] }>("/shadow/promotion"),
+    strategyPromotion: (strategy: string) => fetchAPI<any>(`/shadow/promotion/${strategy}`),
+  },
+
+  // ── Research ─────────────────────────────────
+  research: {
+    registry: (status?: string) =>
+      fetchAPI<{ strategies: any[] }>(`/research/registry${status ? `?status=${status}` : ""}`),
+    registryEntry: (strategyId: string) =>
+      fetchAPI<{ strategy: any }>(`/research/registry/${strategyId}`),
+    registryHistory: (strategyId: string) =>
+      fetchAPI<{ history: any[] }>(`/research/registry/${strategyId}/history`),
+    promote: (strategyId: string, targetStatus: string, notes = "") =>
+      fetchAPI<{ status: string; strategy: any }>(
+        `/research/registry/${strategyId}/promote?target_status=${targetStatus}&notes=${notes}`,
+        { method: "POST" },
+      ),
+    retire: (strategyId: string, successor?: string, notes = "") => {
+      let q = `/research/registry/${strategyId}/retire?notes=${notes}`;
+      if (successor) q += `&successor=${successor}`;
+      return fetchAPI<{ status: string; strategy: any }>(q, { method: "POST" });
+    },
+    champion: () => fetchAPI<any>("/research/champion"),
+    health: () => fetchAPI<{ health: any[] }>("/research/health"),
+    strategyHealth: (strategy: string) => fetchAPI<any>(`/research/health/${strategy}`),
+    invalidateHealth: () =>
+      fetchAPI<{ status: string }>("/research/health/invalidate", { method: "POST" }),
+    report: (strategy: string) => fetchAPI<any>(`/research/report/${strategy}`),
+    portfolioReport: () => fetchAPI<any>("/research/report/portfolio"),
+    invalidateReport: () =>
+      fetchAPI<{ status: string }>("/research/report/invalidate", { method: "POST" }),
+  },
+
+  // ── Tournament ────────────────────────────────
+  tournament: {
+    rankings: () => fetchAPI<{ rankings: any[] }>("/tournament/rankings"),
+    allocations: (mode = "equal", capital = 100000) =>
+      fetchAPI<any>(`/tournament/allocations?mode=${mode}&capital=${capital}`),
+    allAllocations: (capital = 100000) =>
+      fetchAPI<{ modes: any[] }>(`/tournament/allocations/all?capital=${capital}`),
+    simulator: (capital = 100000, mode = "equal") =>
+      fetchAPI<any>(`/tournament/simulator?capital=${capital}&mode=${mode}`),
+    promotions: () => fetchAPI<{ recommendations: any[] }>("/tournament/promotions"),
   },
 };

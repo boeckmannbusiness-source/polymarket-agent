@@ -11,6 +11,7 @@ import { formatPnl, formatNumber } from "@/lib/utils";
 import { api } from "@/lib/api";
 import { CircuitBreakerBadge } from "@/components/CircuitBreakerBadge";
 import { RiskGauge } from "@/components/RiskGauge";
+import { RedisHealthWidget } from "@/components/RedisHealthWidget";
 import {
   Activity, AlertTriangle, RefreshCw, Radio, ShieldCheck, Gauge, RadioReceiver,
   BarChart3, Server, Zap, Layers, ShieldOff,
@@ -140,6 +141,7 @@ export default function MonitoringPage() {
           loading={!latencyData}
         />
       </div>
+      <RedisHealthWidget />
 
       {/* Latency panels */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
