@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback } from "react";
 import { ControlSwitch } from "@/components/ControlSwitch";
 import { CircuitBreakerBadge } from "@/components/CircuitBreakerBadge";
 import { RiskGauge } from "@/components/RiskGauge";
-import { LiveIndicator } from "@/hooks/useWebSocket";
+import { LiveIndicator } from "@/components/LiveIndicator";
 import { api } from "@/lib/api";
 
 export default function StrategiesControlPage() {
