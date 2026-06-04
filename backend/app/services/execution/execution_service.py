@@ -10,6 +10,7 @@ from app.exchanges.polymarket_live import PolymarketLiveAdapter
 from app.core.logging import logger
 from app.services.control.control_plane import control_plane
 from app.services.risk.circuit_breakers import cb_system
+from app.services.audit.audit_logger import emit, audit_context
 
 
 class ExecutionSafetyError(Exception):
@@ -75,6 +76,15 @@ class ExecutionService:
         self.db.add(exchange_order)
         await self.db.flush()
 
+        await emit("trade.created", "trade", str(trade.id), {
+            "order_id": str(exchange_order.id),
+            "order_num": exchange_order.order_num,
+            "engine_type": engine_type,
+            "side": trade.side,
+            "size": str(trade.size),
+            "price": str(trade.price) if trade.price else None,
+        })
+
         await self.submit_order(exchange_order)
         return exchange_order
 
@@ -96,6 +106,14 @@ class ExecutionService:
 
         adapter = await self._get_adapter(exchange_order.engine_type)
         await adapter.submit_order(exchange_order)
+
+        with audit_context(order_id=str(exchange_order.id), trade_id=str(exchange_order.trade_id)):
+            await emit("order.submitted", "exchange_order", str(exchange_order.id), {
+                "engine_type": exchange_order.engine_type,
+                "status": exchange_order.status,
+                "side": exchange_order.side,
+                "size": str(exchange_order.size),
+            })
 
         if exchange_order.engine_type == "live":
             logger.info(

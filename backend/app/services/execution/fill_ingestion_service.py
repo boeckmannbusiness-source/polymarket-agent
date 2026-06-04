@@ -6,6 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import Fill, ExchangeOrder, Trade
 from app.services.execution.fill_handler import FillHandler
+from app.services.reliability.dead_letter_queue import dlq
 from app.core.logging import logger
 
 
@@ -21,6 +22,7 @@ class FillIngestionService:
         clob_fill_id = event.get("id") or event.get("fill_id") or event.get("trade_id")
         if not clob_fill_id:
             logger.warning("clob_fill_missing_id", event=event)
+            await dlq.push("fill_ingestion", "missing_id", event, "No clob_fill_id in event")
             return
 
         existing = await self.db.execute(
@@ -41,6 +43,7 @@ class FillIngestionService:
         exchange_order = result.scalar_one_or_none()
         if not exchange_order:
             logger.warning("clob_fill_unknown_order", clob_order_id=clob_order_id)
+            await dlq.push("fill_ingestion", "unknown_order", event, f"No ExchangeOrder for clob_order_id {clob_order_id}")
             return
 
         trade_id = exchange_order.trade_id

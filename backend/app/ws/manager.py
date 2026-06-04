@@ -10,6 +10,7 @@ from app.core.logging import logger
 from app.services.stream.deduplication import event_dedup
 from app.services.stream.event_store import event_store
 from app.services.monitoring.latency_service import latency_tracker
+from app.services.reliability.dead_letter_queue import dlq
 
 
 class ConnectionManager:
@@ -81,7 +82,8 @@ class ConnectionManager:
                 await ws.send_text(payload)
                 self._backpressure[ws] = now
                 sent += 1
-            except Exception:
+            except Exception as ex:
+                await dlq.push("ws_publish", "ws.send_failed", {"channel": channel, "event_id": event.get("event_id", "")}, str(ex))
                 await self.disconnect(ws, channel)
 
             if sent >= batch_size:

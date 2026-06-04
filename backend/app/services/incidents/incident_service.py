@@ -5,6 +5,7 @@ from typing import Any
 from app.core.logging import logger
 from app.redis import get_redis
 from app.ws.manager import manager
+from app.services.audit.audit_logger import emit
 
 INCIDENTS_KEY = "incidents"
 
@@ -66,6 +67,11 @@ class IncidentService:
         }
         await self._store(incident)
         await self._broadcast(incident)
+        await emit("incident.created", "incident", incident["id"], {
+            "source": "circuit_breaker",
+            "severity": "critical",
+            "breaker_name": breaker_data.get("name"),
+        })
         logger.critical("incident_created_from_breaker", id=incident["id"], name=breaker_data.get("name"))
         return incident
 
@@ -113,6 +119,7 @@ class IncidentService:
             incident["resolved_at"] = datetime.now(timezone.utc).isoformat()
         await self._store(incident)
         await self._broadcast(incident)
+        await emit("incident.updated", "incident", incident_id, {"status": new_status})
         logger.info("incident_status_updated", id=incident_id, status=new_status)
         return True
 

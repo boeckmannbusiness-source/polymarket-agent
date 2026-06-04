@@ -8,6 +8,7 @@ from app.models import ExchangeOrder, Fill
 from app.exchanges.polymarket_client import PolymarketClobClient
 from app.config import settings
 from app.core.logging import logger
+from app.services.reliability.dead_letter_queue import dlq
 
 
 class ReconciliationService:
@@ -31,6 +32,7 @@ class ReconciliationService:
             clob_state = await client.get_order(exchange_order.clob_order_id)
         except Exception as e:
             logger.warning("reconcile_fetch_failed", order_id=str(exchange_order.id), error=str(e))
+            await dlq.push("reconciliation", "fetch_failed", {"order_id": str(exchange_order.id), "clob_order_id": exchange_order.clob_order_id}, str(e))
             return
 
         clob_status = clob_state.get("status", "").lower() if clob_state else ""

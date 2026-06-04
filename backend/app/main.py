@@ -117,6 +117,38 @@ async def lifespan(app: FastAPI):
     try:
         from app.redis import get_redis
         r = await get_redis()
+
+        # ── Redis configuration validation ─────────────────────
+        try:
+            mem_info = await r.info("memory")
+            used = mem_info.get("used_memory", 0)
+            maxmem = mem_info.get("maxmemory", 0)
+            if maxmem:
+                pct = used / maxmem * 100
+                logger.info("redis_memory_at_startup", used_mb=round(used / 1024 / 1024, 1),
+                            maxmemory_mb=round(maxmem / 1024 / 1024, 1), utilization_pct=round(pct, 1))
+                if pct >= 80:
+                    logger.warning("redis_high_memory_utilization", utilization_pct=round(pct, 1))
+            else:
+                logger.warning("redis_no_maxmemory_set")
+
+            policy = await r.config_get("maxmemory-policy")
+            actual_policy = policy.get("maxmemory-policy", "")
+            expected_policy = "allkeys-lru"
+            if actual_policy != expected_policy:
+                logger.warning("redis_maxmemory_policy_mismatch", expected=expected_policy, actual=actual_policy)
+            else:
+                logger.info("redis_maxmemory_policy_ok", policy=actual_policy)
+
+            aof = await r.config_get("appendonly")
+            aof_enabled = aof.get("appendonly", "no")
+            if aof_enabled != "yes":
+                logger.warning("redis_aof_disabled")
+            else:
+                logger.info("redis_aof_enabled")
+        except Exception as e:
+            logger.warning("redis_config_validation_failed", error=str(e))
+
         from app.services.reconciliation_service import check_redis_persistence, run_startup_reconciliation
         await check_redis_persistence(r)
         async with async_session_factory() as rec_db:
@@ -180,7 +212,42 @@ async def lifespan(app: FastAPI):
     bg_tasks.append(asyncio.create_task(_periodic_mode_evaluator(), name="mode_evaluator"))
     logger.info("mode_evaluator_started")
 
+    # ── Scheduler registration ─────────────────────────
+    from app.services.scheduler.task_scheduler import scheduler as _scheduler
+    from app.services.risk.circuit_breakers import cb_system as _cb_system, register_default_breakers
+    from app.services.incidents.incident_service import incident_service as _incident_service
+
+    async def _scheduler_cb_eval():
+        state = await control_plane.get_state()
+        context = {
+            "trading_enabled": state["trading_enabled"],
+            "execution_mode": state["execution_mode"],
+            "paused_strategies": state["paused_strategies"],
+        }
+        triggered = await _cb_system.evaluate_all(context)
+        for cb_data in triggered:
+            await _incident_service.create_from_breaker(cb_data)
+
+    await _scheduler.register_job("circuit_breaker_eval", 30, _scheduler_cb_eval)
+
     monitoring_worker = MonitoringWorker()
+    await _scheduler.register_job("monitoring_worker", 60, monitoring_worker.run_single_cycle)
+
+    # ── Shadow execution sync ────────────────────────
+    from app.services.shadow.shadow_execution_service import shadow_execution_service as _shadow_svc
+
+    async def _shadow_cycle():
+        try:
+            from app.database import async_session_factory
+            async with async_session_factory() as _sdb:
+                await _shadow_svc.sync_from_signals(_sdb)
+                await _shadow_svc.refresh_prices(_sdb)
+        except Exception:
+            logger.warning("shadow_cycle_error", exc_info=True)
+
+    await _scheduler.register_job("shadow_sync", 120, _shadow_cycle)
+
+    # Keep original background task for backward compat during migration
     bg_tasks.append(asyncio.create_task(monitoring_worker.run(), name="monitoring_worker"))
     logger.info("monitoring_worker_started")
 
@@ -194,7 +261,6 @@ async def lifespan(app: FastAPI):
     logger.info("alert_rules_registered")
 
     # ── Circuit breaker registration ───────────────────
-    from app.services.risk.circuit_breakers import register_default_breakers
     register_default_breakers()
     bg_tasks.append(asyncio.create_task(_periodic_circuit_breaker_eval(), name="circuit_breaker_eval"))
     logger.info("circuit_breakers_started")
@@ -207,6 +273,18 @@ async def lifespan(app: FastAPI):
         bg_tasks.append(asyncio.create_task(_periodic_live_reconciliation(), name="live_reconciliation"))
         logger.info("live_reconciliation_started")
 
+    # ── Non-blocking startup recovery scan ────────────
+    bg_tasks.append(asyncio.create_task(_startup_recovery_scan(), name="startup_recovery_scan"))
+
+    # ── DLQ callback registration ─────────────────────
+    from app.services.reliability.dead_letter_queue import dlq as _dlq
+    _dlq.register_callback("reconciliation", lambda _et, _pl: logger.info("dlq_replay_reconciliation", event_type=_et))
+    _dlq.register_callback("fill_ingestion", lambda _et, _pl: logger.info("dlq_replay_fill_ingestion", event_type=_et))
+    _dlq.register_callback("event_store", lambda _et, _pl: logger.info("dlq_replay_event_store", event_type=_et))
+    _dlq.register_callback("ws_publish", lambda _et, _pl: logger.info("dlq_replay_ws_publish", event_type=_et))
+    _dlq.register_callback("scheduler", lambda _et, _pl: logger.info("dlq_replay_scheduler", event_type=_et))
+    logger.info("dlq_callbacks_registered")
+
     yield
 
     logger.info("shutting_down")
@@ -214,6 +292,8 @@ async def lifespan(app: FastAPI):
     await ws_ingester.stop()
     await bridge.stop()
     await orchestrator.stop_all()
+    from app.services.scheduler.task_scheduler import scheduler as _scheduler
+    await _scheduler.shutdown()
     for t in bg_tasks:
         t.cancel()
     await asyncio.gather(*bg_tasks, return_exceptions=True)
@@ -662,6 +742,20 @@ async def _periodic_state_machine_check():
         except Exception as e:
             logger.warning("state_machine_error", error=str(e))
         await asyncio.sleep(120)
+
+
+async def _startup_recovery_scan():
+    import asyncio
+    await asyncio.sleep(60)
+    try:
+        from app.database import async_session_factory
+        from app.services.recovery.order_recovery_service import OrderRecoveryService
+        async with async_session_factory() as _db:
+            svc = OrderRecoveryService(_db)
+            report = await svc.run_scan(force=False)
+            logger.info("startup_recovery_scan_complete", **report)
+    except Exception as e:
+        logger.warning("startup_recovery_scan_error", error=str(e))
 
 
 async def _periodic_circuit_breaker_eval():

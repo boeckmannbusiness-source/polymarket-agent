@@ -1,7 +1,7 @@
 from collections import defaultdict
 
 from app.redis import get_redis
-from app.core.metrics import stream_length, consumer_pending, redis_memory_usage_mb, redis_aof_enabled, dedup_key_count, stream_trim_count, pel_depth
+from app.core.metrics import stream_length, consumer_pending, redis_memory_usage_mb, redis_aof_enabled, dedup_key_count, stream_trim_count, pel_depth, redis_keys_total, redis_peak_memory_mb, redis_utilization_pct
 from app.core.dedup import dedup_size
 from app.core.logging import logger
 
@@ -40,7 +40,19 @@ class RedisMonitor:
             mem_info = await r.info("memory")
             used = mem_info.get("used_memory", 0)
             redis_memory_usage_mb.set(used / 1024 / 1024)
+            peak = mem_info.get("used_memory_peak", 0)
+            redis_peak_memory_mb.set(peak / 1024 / 1024)
             maxmem = mem_info.get("maxmemory", 0)
+            if maxmem:
+                redis_utilization_pct.set((used / maxmem) * 100)
+        except Exception:
+            pass
+
+        try:
+            ks = await r.info("keyspace")
+            db0 = ks.get("db0", {})
+            if isinstance(db0, dict):
+                redis_keys_total.set(int(db0.get("keys", 0)))
         except Exception:
             pass
 

@@ -5,8 +5,14 @@ from app.api import events as events_router
 from app.api import control as control_router
 from app.api import incidents as incidents_router
 from app.api import audit as audit_router
+from app.api import operations as operations_router
 from app.api.monitoring import execution_routes as monitoring_routes
 from app.api.portfolio import router as portfolio_router
+from app.api import shadow as shadow_router
+from app.api import shadow_analytics as shadow_analytics_router
+from app.api import redis_status as redis_status_router
+from app.api import tournament as tournament_router
+from app.api.research import router as research_router
 
 router = APIRouter()
 
@@ -30,3 +36,8 @@ router.include_router(events_router.router, prefix="/events", tags=["events"])
 router.include_router(control_router.router, prefix="/control", tags=["control"])
 router.include_router(incidents_router.router, prefix="/incidents", tags=["incidents"])
 router.include_router(audit_router.router, prefix="/audit", tags=["audit"])
+router.include_router(operations_router.router, prefix="/operations", tags=["operations"])
+router.include_router(shadow_router.router, prefix="/shadow", tags=["shadow"])
+router.include_router(shadow_analytics_router.router, prefix="/shadow", tags=["shadow"])
+router.include_router(redis_status_router.router, prefix="/system", tags=["system"])
+router.include_router(tournament_router.router, prefix="/tournament", tags=["tournament"])

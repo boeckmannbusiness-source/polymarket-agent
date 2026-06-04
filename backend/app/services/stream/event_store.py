@@ -32,13 +32,24 @@ class EventStore:
 
     @staticmethod
     async def store(record: dict[str, Any]) -> str:
-        r = await get_redis()
+        from app.services.reliability.dead_letter_queue import dlq as _dlq
+        try:
+            r = await get_redis()
+        except Exception as e:
+            await _dlq.push("event_store", "redis_unavailable", record, str(e))
+            return record.get("event_id", str(uuid.uuid4()))
         event_id = record.get("event_id", str(uuid.uuid4()))
         data = {k: (json.dumps(v) if isinstance(v, (dict, list)) else str(v)) for k, v in record.items()}
-        await r.xadd(EVENT_STORE_KEY, data, maxlen=EVENT_STORE_MAXLEN, approximate=True)
+        try:
+            await r.xadd(EVENT_STORE_KEY, data, maxlen=EVENT_STORE_MAXLEN, approximate=True)
+        except Exception as e:
+            await _dlq.push("event_store", "xadd_failed", record, str(e))
 
         index_key = f"event_idx:{record.get('entity_type', 'unknown')}:{record.get('entity_id', 'unknown')}"
-        await r.xadd(index_key, data, maxlen=1000, approximate=True)
+        try:
+            await r.xadd(index_key, data, maxlen=1000, approximate=True)
+        except Exception as e:
+            await _dlq.push("event_store", "index_failed", {"event_id": event_id, "index_key": index_key}, str(e))
 
         return event_id
 

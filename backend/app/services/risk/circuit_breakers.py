@@ -6,6 +6,7 @@ from app.core.logging import logger
 from app.redis import get_redis
 from app.ws.manager import manager
 from app.services.control.control_plane import control_plane
+from app.services.audit.audit_logger import emit
 
 CB_PREFIX = "circuit_breaker:"
 CB_REGISTRY_KEY = f"{CB_PREFIX}registry"
@@ -68,6 +69,7 @@ class CircuitBreaker:
             except Exception:
                 pass
         await self._broadcast(entry)
+        await emit("breaker.triggered", "circuit_breaker", self.name, {"reason": reason, "cooldown": self.cooldown})
         logger.critical("circuit_breaker_triggered", name=self.name, reason=reason)
         return entry
 
@@ -80,6 +82,7 @@ class CircuitBreaker:
             except Exception:
                 pass
         await self._broadcast({"name": self.name, "status": "reset"})
+        await emit("breaker.reset", "circuit_breaker", self.name, {})
         logger.info("circuit_breaker_reset", name=self.name)
 
     async def _broadcast(self, data: dict):

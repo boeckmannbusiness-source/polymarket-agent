@@ -78,5 +78,19 @@ class MonitoringWorker:
         except Exception as e:
             logger.warning("monitoring_health_error", error=str(e))
 
+    async def run_single_cycle(self):
+        try:
+            await self._recompute_pnl()
+        except Exception:
+            pass
+        try:
+            await self._scan_drift()
+        except Exception:
+            pass
+        try:
+            await self._check_health()
+        except Exception:
+            pass
+
     async def stop(self):
         self._running = False

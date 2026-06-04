@@ -9,6 +9,7 @@ from app.services.portfolio.portfolio_cache_service import PortfolioCacheService
 from app.services.stream.event_normalizer import EventNormalizer
 from app.services.alerts.alert_service import alert_service
 from app.services.monitoring.latency_service import latency_tracker
+from app.services.audit.audit_logger import emit, audit_context
 from app.ws.manager import manager
 
 
@@ -40,6 +41,18 @@ class FillHandler:
         await manager.broadcast_event(normalized, channels=["fills", "portfolio", "trades"])
 
         await alert_service.evaluate(normalized)
+
+        with audit_context(
+            fill_id=str(fill.id),
+            trade_id=str(fill.trade_id),
+            order_id=str(fill.exchange_order_id),
+        ):
+            await emit("fill.processed", "fill", str(fill.id), {
+                "size": str(fill.size),
+                "price": str(fill.price),
+                "side": fill.side,
+                "outcome": fill.outcome,
+            })
 
         elapsed_ms = (time.time() - start) * 1000
         latency_tracker.record("fill_processing", elapsed_ms)

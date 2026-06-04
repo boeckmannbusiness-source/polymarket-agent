@@ -5,6 +5,7 @@ from collections import defaultdict
 from app.redis import get_redis
 from app.core.logging import logger
 from app.ws.manager import manager
+from app.services.audit.audit_logger import emit
 
 CONTROL_PREFIX = "control:"
 TRADING_KEY = f"{CONTROL_PREFIX}trading_enabled"
@@ -48,6 +49,7 @@ class ControlPlane:
             except Exception:
                 pass
         await self._broadcast_state_change("trading_enabled", {"enabled": enabled})
+        await emit("control.trading_changed", "control", "system", {"enabled": enabled})
         logger.info("control_trading_enabled", enabled=enabled)
 
     async def get_execution_mode(self) -> str:
@@ -71,6 +73,7 @@ class ControlPlane:
             except Exception:
                 pass
         await self._broadcast_state_change("execution_mode", {"mode": mode})
+        await emit("control.mode_changed", "control", "system", {"mode": mode})
         logger.info("control_execution_mode", mode=mode)
 
     async def is_strategy_paused(self, strategy_id: str) -> bool:
@@ -94,6 +97,7 @@ class ControlPlane:
             except Exception:
                 pass
         await self._broadcast_state_change("strategy_paused", {"strategy_id": strategy_id})
+        await emit("control.strategy_paused", "strategy", strategy_id, {})
         logger.info("control_strategy_paused", strategy_id=strategy_id)
 
     async def resume_strategy(self, strategy_id: str):
