@@ -1,6 +1,7 @@
 from uuid import UUID
 
 from sqlalchemy import select, func, desc
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import Market, MarketEvent
@@ -66,14 +67,23 @@ class MarketService:
             elif isinstance(clob, list):
                 kwargs["clob_token_ids"] = [str(t) for t in clob if t]
 
-        result = await self.db.execute(select(Market).where(Market.condition_id == condition_id))
-        market = result.scalar_one_or_none()
-        if market:
-            for key, value in kwargs.items():
-                if value is not None:
-                    setattr(market, key, value)
+        insert_values = {"condition_id": condition_id}
+        for key, value in kwargs.items():
+            if value is not None:
+                insert_values[key] = value
+
+        stmt = pg_insert(Market).values(**insert_values)
+        update_dict = {k: stmt.excluded[k] for k in insert_values if k not in ("condition_id", "id", "created_at")}
+        if update_dict:
+            stmt = stmt.on_conflict_do_update(
+                index_elements=[Market.condition_id],
+                set_=update_dict,
+            )
         else:
-            market = Market(condition_id=condition_id, **{k: v for k, v in kwargs.items() if v is not None})
-            self.db.add(market)
+            stmt = stmt.on_conflict_do_nothing(index_elements=[Market.condition_id])
+
+        await self.db.execute(stmt)
         await self.db.flush()
-        return market
+
+        result = await self.db.execute(select(Market).where(Market.condition_id == condition_id))
+        return result.scalar_one()

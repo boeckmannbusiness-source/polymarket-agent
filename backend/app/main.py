@@ -94,6 +94,14 @@ async def lifespan(app: FastAPI):
 
     bg_tasks = []
 
+    # Register the mode manager early so background tasks can call get_mode_manager()
+    try:
+        await asyncio.wait_for(_mode_manager.load_from_redis(), timeout=10)
+    except Exception:
+        logger.warning("mode_manager_load_failed")
+    set_global_manager(_mode_manager)
+    _wire_mode_api(_mode_manager)
+
     bg_tasks.append(asyncio.create_task(rest_ingester.run(), name="rest_ingester"))
     logger.info("rest_ingester_started", interval=60)
 
@@ -157,8 +165,8 @@ async def lifespan(app: FastAPI):
     bg_tasks.append(asyncio.create_task(_periodic_pel_recovery(), name="pel_recovery"))
     logger.info("pel_recovery_started")
 
-    bg_tasks.append(asyncio.create_task(_periodic_pending_trade_recovery(), name="pending_trade_recovery"))
-    logger.info("pending_trade_recovery_started")
+    # pending_trade_recovery is handled by pel_recovery above
+    logger.info("pending_trade_recovery_skipped")
 
     bg_tasks.append(asyncio.create_task(_periodic_replay_parity_check(), name="replay_parity"))
     logger.info("replay_parity_check_started")
@@ -169,9 +177,6 @@ async def lifespan(app: FastAPI):
     bg_tasks.append(asyncio.create_task(_periodic_pool_monitor(), name="pool_monitor"))
     logger.info("pool_monitor_started")
 
-    await _mode_manager.load_from_redis()
-    set_global_manager(_mode_manager)
-    _wire_mode_api(_mode_manager)
     bg_tasks.append(asyncio.create_task(_periodic_mode_evaluator(), name="mode_evaluator"))
     logger.info("mode_evaluator_started")
 
@@ -187,6 +192,12 @@ async def lifespan(app: FastAPI):
     from app.services.alerts.alert_service import alert_service as _alert_service
     _alert_service.register_default_rules()
     logger.info("alert_rules_registered")
+
+    # ── Circuit breaker registration ───────────────────
+    from app.services.risk.circuit_breakers import register_default_breakers
+    register_default_breakers()
+    bg_tasks.append(asyncio.create_task(_periodic_circuit_breaker_eval(), name="circuit_breaker_eval"))
+    logger.info("circuit_breakers_started")
 
     if settings.TRADING_MODE == "live":
         clob_poller = CLOBFillPoller(poll_interval=30)
@@ -237,6 +248,7 @@ async def _periodic_db_cleanup():
             break
         except Exception as e:
             logger.warning("db_cleanup_error", error=str(e))
+            await asyncio.sleep(5)
 
 
 async def _periodic_redis_cleanup():
@@ -650,6 +662,31 @@ async def _periodic_state_machine_check():
         except Exception as e:
             logger.warning("state_machine_error", error=str(e))
         await asyncio.sleep(120)
+
+
+async def _periodic_circuit_breaker_eval():
+    import asyncio
+    from app.services.risk.circuit_breakers import cb_system
+    from app.services.incidents.incident_service import incident_service
+    from app.services.control.control_plane import control_plane
+
+    await asyncio.sleep(30)
+    while True:
+        try:
+            state = await control_plane.get_state()
+            context = {
+                "trading_enabled": state["trading_enabled"],
+                "execution_mode": state["execution_mode"],
+                "paused_strategies": state["paused_strategies"],
+            }
+            triggered = await cb_system.evaluate_all(context)
+            for cb_data in triggered:
+                await incident_service.create_from_breaker(cb_data)
+        except asyncio.CancelledError:
+            break
+        except Exception as e:
+            logger.warning("circuit_breaker_eval_error", error=str(e))
+        await asyncio.sleep(30)
 
 
 async def _periodic_health_snapshot():

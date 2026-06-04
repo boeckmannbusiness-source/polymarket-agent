@@ -8,12 +8,33 @@ from app.models import Trade, ExchangeOrder
 from app.exchanges.paper import PaperExchangeAdapter
 from app.exchanges.polymarket_live import PolymarketLiveAdapter
 from app.core.logging import logger
+from app.services.control.control_plane import control_plane
+from app.services.risk.circuit_breakers import cb_system
+
+
+class ExecutionSafetyError(Exception):
+    pass
 
 
 class ExecutionService:
     def __init__(self, db: AsyncSession):
         self.db = db
         self._live_adapter: PolymarketLiveAdapter | None = None
+
+    async def _check_safety(self, trade: Trade | None = None):
+        if not await control_plane.is_trading_enabled():
+            raise ExecutionSafetyError("Global trading disabled by control plane")
+
+        if trade and trade.agent_id and await control_plane.is_strategy_paused(trade.agent_id):
+            raise ExecutionSafetyError(f"Strategy paused: {trade.agent_id}")
+
+        if trade and trade.market_id and await control_plane.is_market_paused(trade.market_id):
+            raise ExecutionSafetyError(f"Market paused: {trade.market_id}")
+
+        active_breakers = await cb_system.get_active()
+        if active_breakers:
+            names = [b.get("name") for b in active_breakers]
+            raise ExecutionSafetyError(f"Active circuit breakers: {names}")
 
     async def _get_adapter(self, engine_type: str):
         if engine_type == "paper":
@@ -26,6 +47,7 @@ class ExecutionService:
             raise ValueError(f"Unknown engine_type: {engine_type}")
 
     async def create_trade_execution(self, trade: Trade):
+        await self._check_safety(trade)
         engine_type = trade.trade_type or "paper"
 
         result = await self.db.execute(
@@ -57,6 +79,7 @@ class ExecutionService:
         return exchange_order
 
     async def submit_order(self, exchange_order: ExchangeOrder):
+        await self._check_safety()
         existing = await self.db.execute(
             select(ExchangeOrder).where(
                 ExchangeOrder.id == exchange_order.id,

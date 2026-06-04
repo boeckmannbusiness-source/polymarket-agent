@@ -11,7 +11,8 @@ engine = create_async_engine(
     max_overflow=settings.DATABASE_MAX_OVERFLOW,
     pool_pre_ping=True,
     pool_recycle=300,
-    connect_args={"timeout": 10, "command_timeout": 30, "options": "-c statement_timeout=15000"},
+    connect_args={"timeout": 10, "command_timeout": 30, "server_settings": {"statement_timeout": "15000"},
+                  "statement_cache_size": 0},
     echo=settings.APP_DEBUG,
 )
 

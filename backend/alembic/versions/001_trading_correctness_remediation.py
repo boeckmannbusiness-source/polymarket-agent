@@ -53,6 +53,17 @@ def upgrade() -> None:
         sa.UniqueConstraint("strategy_name", name=op.f("uq_strategy_allocation_states_strategy_name")),
     )
 
+    # Ensure pipeline_metrics table exists (used by in-memory metrics service)
+    op.execute(
+        """
+        CREATE TABLE IF NOT EXISTS pipeline_metrics (
+            metric_name TEXT PRIMARY KEY,
+            metric_value NUMERIC NOT NULL DEFAULT 0,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )
+        """
+    )
+
     # TC3: Add signal_eval_missing_entry_price metric
     op.execute(
         """

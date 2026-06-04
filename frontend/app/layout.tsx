@@ -25,6 +25,9 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
                 <a href="/portfolio/strategies" className="hover:text-white transition-colors whitespace-nowrap">Strategies</a>
                 <a href="/portfolio/exposure" className="hover:text-white transition-colors whitespace-nowrap">Exposure</a>
                 <a href="/monitoring" className="hover:text-white transition-colors whitespace-nowrap">Monitoring</a>
+                <a href="/monitoring/replay" className="hover:text-white transition-colors whitespace-nowrap">Replay</a>
+                <a href="/monitoring/strategies-control" className="hover:text-white transition-colors whitespace-nowrap">Control</a>
+                <a href="/incidents" className="hover:text-white transition-colors whitespace-nowrap">Incidents</a>
                 <a href="/markets" className="hover:text-white transition-colors whitespace-nowrap">Markets</a>
                 <a href="/trades" className="hover:text-white transition-colors whitespace-nowrap">Trades</a>
               </div>

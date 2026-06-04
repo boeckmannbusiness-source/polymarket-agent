@@ -9,9 +9,11 @@ import { DriftAlertBanner } from "@/components/DriftAlertBanner";
 import { LiveIndicator } from "@/components/LiveIndicator";
 import { formatPnl, formatNumber } from "@/lib/utils";
 import { api } from "@/lib/api";
+import { CircuitBreakerBadge } from "@/components/CircuitBreakerBadge";
+import { RiskGauge } from "@/components/RiskGauge";
 import {
   Activity, AlertTriangle, RefreshCw, Radio, ShieldCheck, Gauge, RadioReceiver,
-  BarChart3, Server, Zap, Layers,
+  BarChart3, Server, Zap, Layers, ShieldOff,
 } from "lucide-react";
 
 export default function MonitoringPage() {
@@ -25,15 +27,21 @@ export default function MonitoringPage() {
   const [debugMode, setDebugMode] = useState(false);
   const [streamPaused, setStreamPaused] = useState(false);
   const [entityFilter, setEntityFilter] = useState("");
+  const [breakers, setBreakers] = useState<any[]>([]);
+  const [incidentStats, setIncidentStats] = useState<any>(null);
 
   const fetchStats = useCallback(async () => {
     try {
-      const [s, l] = await Promise.all([
+      const [s, l, b, inc] = await Promise.all([
         fetch("/api/v1/events/monitoring/ws-stats").then(r => r.json()).catch(() => null),
         fetch("/api/v1/events/monitoring/latency").then(r => r.json()).catch(() => null),
+        fetch("/api/v1/incidents/breakers/active").then(r => r.json()).catch(() => null),
+        fetch("/api/v1/incidents").then(r => r.json()).catch(() => null),
       ]);
       if (s) setWsStats(s);
       if (l) setLatencyData(l);
+      if (b) setBreakers(b.breakers || []);
+      if (inc) setIncidentStats(inc.stats || null);
     } catch {}
   }, []);
 
@@ -192,6 +200,109 @@ export default function MonitoringPage() {
               <span className="text-muted-foreground">p99 (15m)</span>
               <span className="font-mono">{replayLatency?.p99_15m ?? "-"}ms</span>
             </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Risk Dashboard */}
+      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+        <div className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-4 col-span-1">
+          <h2 className="text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-3">
+            <ShieldOff className="h-3 w-3 inline mr-1" />
+            Circuit Breakers
+          </h2>
+          <div className="space-y-2">
+            {["loss_circuit", "execution_failure", "latency_spike", "drift_breaker"].map((name) => {
+              const active = breakers.find((b: any) => b.name === name);
+              return (
+                <CircuitBreakerBadge key={name} name={name} triggered={!!active} reason={active?.reason} />
+              );
+            })}
+          </div>
+        </div>
+
+        <div className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-4 col-span-1">
+          <h2 className="text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-3">
+            System Health
+          </h2>
+          <RiskGauge score={breakers.length > 0 ? 35 : 85} label="Health Score" />
+        </div>
+
+        <div className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-4 col-span-2">
+          <h2 className="text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-3">
+            Incident Summary
+          </h2>
+          <div className="grid grid-cols-5 gap-2">
+            {[
+              { label: "Total", value: incidentStats?.total ?? 0, color: "text-white" },
+              { label: "Open", value: incidentStats?.open ?? 0, color: "text-red-400" },
+              { label: "Investigating", value: incidentStats?.investigating ?? 0, color: "text-amber-400" },
+              { label: "Mitigated", value: incidentStats?.mitigated ?? 0, color: "text-blue-400" },
+              { label: "Resolved", value: incidentStats?.resolved ?? 0, color: "text-emerald-400" },
+            ].map((s) => (
+              <div key={s.label} className="text-center">
+                <div className={`text-lg font-bold font-mono ${s.color}`}>{s.value}</div>
+                <div className="text-[9px] text-muted-foreground uppercase mt-0.5">{s.label}</div>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      {/* Risk exposure + worst strategies */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+        <div className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-4">
+          <h2 className="text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-4">
+            <BarChart3 className="h-3.5 w-3.5 inline mr-1" />
+            Risk Exposure
+          </h2>
+          <div className="space-y-3">
+            <div className="flex items-center justify-between py-2 border-b border-gray-900">
+              <span className="text-xs text-gray-400">Net Exposure</span>
+              <span className="text-xs font-bold font-mono text-white">${formatNumber(snapshot?.net_exposure ?? 0)}</span>
+            </div>
+            <div className="flex items-center justify-between py-2 border-b border-gray-900">
+              <span className="text-xs text-gray-400">Concentration Risk</span>
+              <span className="text-xs font-bold font-mono text-amber-500">{exposure ? `${exposure.concentration_risk_pct.toFixed(1)}%` : "-"}</span>
+            </div>
+            <div className="flex items-center justify-between py-2 border-b border-gray-900">
+              <span className="text-xs text-gray-400">Liquidation Risk</span>
+              <span className={`text-xs font-bold font-mono ${(snapshot?.drawdown ?? 0) > 0.15 ? "text-red-500" : "text-emerald-500"}`}>
+                {(snapshot?.drawdown ?? 0) > 0.15 ? "HIGH" : "LOW"}
+              </span>
+            </div>
+            <div className="flex items-center justify-between py-2">
+              <span className="text-xs text-gray-400">Worst Performer</span>
+              <span className="text-xs font-bold font-mono text-red-500">
+                {(snapshot?.strategy_breakdown || []).sort((a: any, b: any) => a.total_pnl - b.total_pnl)[0]?.agent_id ?? "-"}
+              </span>
+            </div>
+          </div>
+        </div>
+
+        <div className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-4">
+          <h2 className="text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-4">
+            <Gauge className="h-3.5 w-3.5 inline mr-1" />
+            Worst Strategies (Live)
+          </h2>
+          <div className="space-y-2">
+            {(snapshot?.strategy_breakdown || [])
+              .sort((a: any, b: any) => a.total_pnl - b.total_pnl)
+              .slice(0, 5)
+              .map((s: any) => (
+                <div key={s.agent_id} className="flex items-center justify-between py-1.5 border-b border-gray-900 text-xs">
+                  <span className="text-gray-300">{s.agent_id}</span>
+                  <div className="flex items-center gap-3">
+                    <span className="text-muted-foreground">{s.trade_count} trades</span>
+                    <span className={`font-mono font-bold ${s.total_pnl >= 0 ? "text-emerald-500" : "text-red-500"}`}>
+                      {formatPnl(s.total_pnl)}
+                    </span>
+                  </div>
+                </div>
+              ))}
+            {(!snapshot?.strategy_breakdown || snapshot.strategy_breakdown.length === 0) && (
+              <div className="text-center py-4 text-xs text-muted-foreground">No data</div>
+            )}
           </div>
         </div>
       </div>

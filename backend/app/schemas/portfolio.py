@@ -39,6 +39,12 @@ class PositionView(BaseModel):
     model_config = {"from_attributes": True}
 
 
+class PnlPoint(BaseModel):
+    timestamp: datetime
+    cumulative_pnl: float
+    drawdown: float
+
+
 class StrategyPerformance(BaseModel):
     agent_id: str
     strategy_name: str | None = None
@@ -56,12 +62,6 @@ class StrategyPerformance(BaseModel):
     total_fees: float
     pnl_curve: list[PnlPoint]
     created_at: datetime
-
-
-class PnlPoint(BaseModel):
-    timestamp: datetime
-    cumulative_pnl: float
-    drawdown: float
 
 
 class StrategySummary(BaseModel):
@@ -89,16 +89,6 @@ class TradeTimeline(BaseModel):
     events: list[TradeTimelineEvent]
 
 
-class MarketExposure(BaseModel):
-    total_long_exposure: float
-    total_short_exposure: float
-    net_exposure: float
-    concentration_risk_pct: float
-    largest_positions: list[MarketExposureSummary]
-    exposure_by_market: list[MarketExposureSummary]
-    timestamp: datetime
-
-
 class MarketExposureSummary(BaseModel):
     market_id: UUID
     market_slug: str | None = None
@@ -109,3 +99,13 @@ class MarketExposureSummary(BaseModel):
     exposure_value: float
     pct_of_portfolio: float
     unrealized_pnl: float
+
+
+class MarketExposure(BaseModel):
+    total_long_exposure: float
+    total_short_exposure: float
+    net_exposure: float
+    concentration_risk_pct: float
+    largest_positions: list[MarketExposureSummary]
+    exposure_by_market: list[MarketExposureSummary]
+    timestamp: datetime

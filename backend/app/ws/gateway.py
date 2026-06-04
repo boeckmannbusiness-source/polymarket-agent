@@ -102,3 +102,17 @@ async def ws_alerts(websocket: WebSocket):
         await manager.disconnect(websocket, "alerts")
     except Exception:
         await manager.disconnect(websocket, "alerts")
+
+
+@ws_router.websocket("/ws/control")
+async def ws_control(websocket: WebSocket):
+    await manager.connect(websocket, "control")
+    try:
+        while True:
+            data = await websocket.receive_text()
+            if data == "ping":
+                await websocket.send_text('{"type":"pong"}')
+    except WebSocketDisconnect:
+        await manager.disconnect(websocket, "control")
+    except Exception:
+        await manager.disconnect(websocket, "control")
