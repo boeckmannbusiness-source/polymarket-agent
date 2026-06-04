@@ -413,4 +413,15 @@ export const api = {
       fetchAPI<any>(`/tournament/simulator?capital=${capital}&mode=${mode}`),
     promotions: () => fetchAPI<{ recommendations: any[] }>("/tournament/promotions"),
   },
+
+  // ── Research Agents ────────────────────────────
+  researchAgents: {
+    signals: (lifecycle?: string) =>
+      fetchAPI<{ signals: any[] }>(`/research-agents/signals${lifecycle ? `?lifecycle=${lifecycle}` : ""}`),
+    consensus: () => fetchAPI<{ approved_count: number; rejected_count: number; pending_count: number; approved: any[]; rejected: any[]; pending: any[] }>("/research-agents/consensus"),
+    health: () => fetchAPI<{ agents: any[] }>("/research-agents/health"),
+    registry: () => fetchAPI<{ stats: any; agent_counts: any[] }>("/research-agents/registry"),
+    run: () => fetchAPI<any>("/research-agents/run", { method: "POST" }),
+    status: () => fetchAPI<any>("/research-agents/status"),
+  },
 };

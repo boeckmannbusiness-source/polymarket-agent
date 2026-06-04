@@ -13,6 +13,7 @@ from app.api import shadow_analytics as shadow_analytics_router
 from app.api import redis_status as redis_status_router
 from app.api import tournament as tournament_router
 from app.api.research import router as research_router
+from app.api.research_agents import router as research_agents_router
 
 router = APIRouter()
 
@@ -41,3 +42,4 @@ router.include_router(shadow_router.router, prefix="/shadow", tags=["shadow"])
 router.include_router(shadow_analytics_router.router, prefix="/shadow", tags=["shadow"])
 router.include_router(redis_status_router.router, prefix="/system", tags=["system"])
 router.include_router(tournament_router.router, prefix="/tournament", tags=["tournament"])
+router.include_router(research_agents_router, prefix="/research-agents", tags=["research_agents"])
