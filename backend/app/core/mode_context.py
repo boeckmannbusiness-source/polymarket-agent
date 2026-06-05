@@ -11,6 +11,7 @@ class MetricClass(Enum):
 METRIC_CLASSIFICATION: dict[str, MetricClass] = {
     "db_pool_utilization_pct": MetricClass.STRUCTURAL,
     "redis_memory_pct": MetricClass.STRUCTURAL,
+    "redis_provider_pct": MetricClass.STRUCTURAL,
     "circuit_breaker_open": MetricClass.STRUCTURAL,
     "db_ok": MetricClass.STRUCTURAL,
     "emergency_stop": MetricClass.STRUCTURAL,

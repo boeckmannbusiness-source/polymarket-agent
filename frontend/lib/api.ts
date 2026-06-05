@@ -414,7 +414,61 @@ export const api = {
     promotions: () => fetchAPI<{ recommendations: any[] }>("/tournament/promotions"),
   },
 
+  // ── Governance & Portfolio Manager ─────────────
+  governance: {
+    decisions: () => fetchAPI<{ decisions: any[] }>("/governance/decisions"),
+    promotions: () => fetchAPI<{ promotions: any[] }>("/governance/promotions"),
+    retirements: () => fetchAPI<{ retirements: any[] }>("/governance/retirements"),
+    allocations: () => fetchAPI<{ allocations: any[] }>("/governance/allocations"),
+    records: () => fetchAPI<{ records: any[] }>("/governance/records"),
+  },
+
+  portfolioManager: {
+    recommendation: () => fetchAPI<{ recommendation: any }>("/portfolio-manager/recommendation"),
+    allocationPlan: () => fetchAPI<{ plan: any }>("/portfolio-manager/allocation-plan"),
+    run: () => fetchAPI<{ recommendation: any }>("/portfolio-manager/run", { method: "POST" }),
+  },
+
+  // ── Evolution ─────────────────────────────────
+  evolution: {
+    population: () => fetchAPI<{ population: any[] }>("/evolution/population"),
+    lineage: () => fetchAPI<{ lineage: any[] }>("/evolution/lineage"),
+    candidates: () => fetchAPI<{ candidates: any[] }>("/evolution/candidates"),
+    generations: () => fetchAPI<{ generations: any[] }>("/evolution/generations"),
+    run: () => fetchAPI<{ run: any }>("/evolution/run", { method: "POST" }),
+    runs: () => fetchAPI<{ runs: any[] }>("/evolution/runs"),
+    promote: (candidateId: string) =>
+      fetchAPI<{ status: string; candidate_id: string }>(`/evolution/candidates/${candidateId}/promote`, { method: "POST" }),
+  },
+
   // ── Research Agents ────────────────────────────
+  // ── Intelligence ───────────────────────────────
+  intelligence: {
+    portfolio: () => fetchAPI<{ latest: any; history: any[] }>("/intelligence/portfolio"),
+    resilience: () => fetchAPI<{ latest: any; history: any[] }>("/intelligence/resilience"),
+    stressTests: () => fetchAPI<{ scenarios: any[]; results: any[] }>("/intelligence/stress-tests"),
+    committee: () => fetchAPI<{ latest: any; history: any[] }>("/intelligence/committee"),
+    reviews: () => fetchAPI<{ reviews: any[] }>("/intelligence/reviews"),
+    runReview: () => fetchAPI<{ review: any }>("/intelligence/review/run", { method: "POST" }),
+  },
+
+  // ── Optimization ──────────────────────────────
+  optimization: {
+    getPortfolio: () => fetchAPI<any>("/optimization/portfolio"),
+    getSimulation: () => fetchAPI<any>("/optimization/simulation"),
+    getRisk: () => fetchAPI<any>("/optimization/risk"),
+    getExpectedReturns: () => fetchAPI<any>("/optimization/expected-returns"),
+    run: () => fetchAPI<{ job_id: string; status: string; summary: string }>("/optimization/run", { method: "POST" }),
+  },
+
+  // ── Portfolio Control ─────────────────────────
+  controlPortfolio: {
+    state: () => fetchAPI<any>("/control/portfolio/state"),
+    drift: () => fetchAPI<any>("/control/portfolio/drift"),
+    stability: () => fetchAPI<any>("/control/portfolio/stability"),
+    run: () => fetchAPI<any>("/control/portfolio/run", { method: "POST" }),
+  },
+
   researchAgents: {
     signals: (lifecycle?: string) =>
       fetchAPI<{ signals: any[] }>(`/research-agents/signals${lifecycle ? `?lifecycle=${lifecycle}` : ""}`),

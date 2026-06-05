@@ -70,6 +70,7 @@ class Settings(BaseSettings):
     REDIS_URL: str = "redis://user:password@host:6379/0"
     REDIS_MAX_CONNECTIONS: int = 10
     REDIS_STREAM_MAXLEN: int = 1000
+    REDIS_PLAN_LIMIT_MB: int = 30
 
     # Telegram
     TELEGRAM_BOT_TOKEN: str = ""

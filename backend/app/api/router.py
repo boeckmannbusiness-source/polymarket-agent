@@ -14,6 +14,12 @@ from app.api import redis_status as redis_status_router
 from app.api import tournament as tournament_router
 from app.api.research import router as research_router
 from app.api.research_agents import router as research_agents_router
+from app.api import evolution as evolution_router
+from app.api import governance as governance_router
+from app.api import research_memory as research_memory_router
+from app.api import research_pipeline as research_pipeline_router
+from app.api import intelligence as intelligence_router
+from app.api import optimization as optimization_router
 
 router = APIRouter()
 
@@ -43,3 +49,9 @@ router.include_router(shadow_analytics_router.router, prefix="/shadow", tags=["s
 router.include_router(redis_status_router.router, prefix="/system", tags=["system"])
 router.include_router(tournament_router.router, prefix="/tournament", tags=["tournament"])
 router.include_router(research_agents_router, prefix="/research-agents", tags=["research_agents"])
+router.include_router(evolution_router.router, prefix="/evolution", tags=["evolution"])
+router.include_router(governance_router.router, tags=["governance"])
+router.include_router(research_memory_router.router, tags=["research_memory"])
+router.include_router(research_pipeline_router.router, tags=["research_pipeline"])
+router.include_router(intelligence_router.router, tags=["intelligence"])
+router.include_router(optimization_router.router, prefix="/optimization", tags=["optimization"])

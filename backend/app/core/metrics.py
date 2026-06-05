@@ -34,6 +34,7 @@ dedup_key_count = Gauge("polymarket_dedup_key_count", "Dedup key count")
 redis_keys_total = Gauge("polymarket_redis_keys_total", "Total Redis keys across all databases")
 redis_peak_memory_mb = Gauge("polymarket_redis_peak_memory_mb", "Redis peak memory in MB")
 redis_utilization_pct = Gauge("polymarket_redis_utilization_pct", "Redis maxmemory utilization percentage")
+redis_provider_utilization_pct = Gauge("polymarket_redis_provider_utilization_pct", "Redis provider plan utilization percentage (used_memory / REDIS_PLAN_LIMIT_MB)")
 stream_trim_count = Gauge("polymarket_stream_trimmed_messages", "Messages trimmed from stream", ["stream"])
 db_pool_size = Gauge("polymarket_db_pool_size", "DB connection pool state", ["state"])
 pel_depth = Gauge("polymarket_pel_depth", "XPENDING depth by stream:group", ["stream", "group"])
@@ -60,3 +61,22 @@ metric_classification_unknown_total = Counter("polymarket_metric_classification_
 mode_flips_total = Counter("polymarket_mode_flips_total", "Mode direction flips within oscillation window")
 mode_escalation_chain_depth = Gauge("polymarket_mode_escalation_chain_depth", "Current escalation chain length")
 mode_proposal_rejected_total = Counter("polymarket_mode_proposal_rejected_total", "Proposed mode rejections", ["reason"])
+
+# ── Phase 4E Intelligence metrics ──────────────────────────
+portfolio_reviews_generated = Counter("polymarket_portfolio_reviews_generated_total", "Portfolio reviews generated")
+committee_reports_generated = Counter("polymarket_committee_reports_generated_total", "Committee reports generated")
+stress_tests_executed = Counter("polymarket_stress_tests_executed_total", "Stress tests executed")
+regime_allocations_generated = Counter("polymarket_regime_allocations_generated_total", "Regime allocations generated")
+resilience_reports_generated = Counter("polymarket_resilience_reports_generated_total", "Resilience reports generated")
+
+# ── Phase 4F Optimization metrics ──────────────────────────
+portfolio_optimization_runs = Counter("polymarket_portfolio_optimization_runs_total", "Total portfolio optimization runs")
+monte_carlo_simulations_executed = Counter("polymarket_monte_carlo_simulations_total", "Monte Carlo simulations executed")
+allocation_learning_updates = Counter("polymarket_allocation_learning_updates_total", "Allocation learning updates applied")
+risk_model_updates = Counter("polymarket_risk_model_updates_total", "Risk model recalculations")
+
+# ── Phase 4G Control metrics ──────────────────────────
+portfolio_stability_score = Gauge("polymarket_portfolio_stability_score", "Portfolio stability score (0-100)")
+allocation_drift_events = Counter("polymarket_allocation_drift_events_total", "Allocation drift events detected")
+feedback_dampening_adjustments = Counter("polymarket_feedback_dampening_adjustments_total", "Feedback dampening adjustments applied")
+regime_stability_updates = Counter("polymarket_regime_stability_updates_total", "Regime stability updates applied")

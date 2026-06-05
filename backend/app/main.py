@@ -130,7 +130,15 @@ async def lifespan(app: FastAPI):
                 if pct >= 80:
                     logger.warning("redis_high_memory_utilization", utilization_pct=round(pct, 1))
             else:
-                logger.warning("redis_no_maxmemory_set")
+                used_mb = round(used / 1024 / 1024, 1)
+                limit_mb = settings.REDIS_PLAN_LIMIT_MB
+                provider_pct = round(used_mb / limit_mb * 100, 1) if limit_mb > 0 else 0
+                logger.warning("redis_no_maxmemory_set_falling_back_to_provider_plan",
+                               used_mb=used_mb, provider_plan_limit_mb=limit_mb,
+                               provider_utilization_pct=provider_pct)
+                if limit_mb > 0 and provider_pct >= 80:
+                    logger.warning("redis_high_provider_utilization",
+                                   utilization_pct=provider_pct, provider_plan_limit_mb=limit_mb)
 
             policy = await r.config_get("maxmemory-policy")
             actual_policy = policy.get("maxmemory-policy", "")
@@ -246,6 +254,39 @@ async def lifespan(app: FastAPI):
             logger.warning("shadow_cycle_error", exc_info=True)
 
     await _scheduler.register_job("shadow_sync", 120, _shadow_cycle)
+
+    # ── Portfolio review scheduler ────────────────────────
+    from app.services.intelligence.autonomous_portfolio_review import autonomous_portfolio_review as _portfolio_review
+
+    async def _portfolio_review_cycle():
+        try:
+            await _portfolio_review.run()
+        except Exception:
+            logger.warning("portfolio_review_cycle_error", exc_info=True)
+
+    await _scheduler.register_job("portfolio_review", 86400, _portfolio_review_cycle)  # 24h
+
+    # ── Portfolio optimization scheduler (runs AFTER portfolio review) ──
+    from app.services.optimization.autonomous_optimization_pipeline import autonomous_optimization_pipeline as _optimization_pipeline
+
+    async def _optimization_cycle():
+        try:
+            await _optimization_pipeline.run()
+        except Exception:
+            logger.warning("optimization_cycle_error", exc_info=True)
+
+    await _scheduler.register_job("portfolio_optimization", 86400, _optimization_cycle)  # 24h
+
+    # ── Portfolio control scheduler (runs AFTER optimization) ──
+    from app.services.control.autonomous_control_pipeline import autonomous_control_pipeline as _control_pipeline
+
+    async def _control_cycle():
+        try:
+            await _control_pipeline.run()
+        except Exception:
+            logger.warning("control_cycle_error", exc_info=True)
+
+    await _scheduler.register_job("portfolio_control", 86400, _control_cycle)  # 24h
 
     # Keep original background task for backward compat during migration
     bg_tasks.append(asyncio.create_task(monitoring_worker.run(), name="monitoring_worker"))
@@ -3333,11 +3374,16 @@ async def _periodic_mode_evaluator():
                 raw["db_pool_utilization_pct"] = 0
 
             try:
+                from app.config import settings
                 r = await get_redis()
                 info = await r.info("memory")
                 used_mem = info.get("used_memory", 0)
-                max_mem = info.get("maxmemory", 0) or 500 * 1024 * 1024
-                raw["redis_memory_pct"] = (used_mem / max_mem) * 100
+                used_mb = used_mem / 1024 / 1024
+                max_mem = info.get("maxmemory", 0)
+                if max_mem:
+                    raw["redis_memory_pct"] = (used_mem / max_mem) * 100
+                elif settings.REDIS_PLAN_LIMIT_MB > 0:
+                    raw["redis_memory_pct"] = (used_mb / settings.REDIS_PLAN_LIMIT_MB) * 100
             except Exception:
                 raw["redis_memory_pct"] = 0
 

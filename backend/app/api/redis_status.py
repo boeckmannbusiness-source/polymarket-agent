@@ -1,6 +1,7 @@
 from fastapi import APIRouter
 
 from app.redis import get_redis
+from app.config import settings
 from app.core.logging import logger
 
 router = APIRouter()
@@ -14,8 +15,10 @@ async def get_redis_status():
 
     used_mb = info["used_memory"] / 1024 / 1024
     peak_mb = info["used_memory_peak"] / 1024 / 1024
-    max_mb = info.get("maxmemory", 536870912) / 1024 / 1024
-    pct = (used_mb / max_mb * 100) if max_mb > 0 else 0
+    max_mb = info.get("maxmemory", 0) / 1024 / 1024
+    utilization_pct = max((used_mb / max_mb * 100) if max_mb > 0 else 0, 0)
+    provider_limit_mb = settings.REDIS_PLAN_LIMIT_MB
+    provider_utilization_pct = (used_mb / provider_limit_mb * 100) if provider_limit_mb > 0 else 0
 
     db0 = keyspace.get("db0", {})
     if isinstance(db0, dict):
@@ -31,7 +34,9 @@ async def get_redis_status():
         "used_memory_mb": round(used_mb, 1),
         "peak_memory_mb": round(peak_mb, 1),
         "maxmemory_mb": round(max_mb, 1),
-        "utilization_percent": round(pct, 1),
+        "utilization_percent": round(utilization_pct, 1),
+        "provider_plan_limit_mb": provider_limit_mb,
+        "provider_utilization_percent": round(provider_utilization_pct, 1),
         "key_count": keys_total,
         "keys_with_expiry": expires,
         "avg_ttl_seconds": round(avg_ttl, 0),
