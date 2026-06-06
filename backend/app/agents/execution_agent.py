@@ -129,6 +129,37 @@ class ExecutionAgent(BaseAgent):
             logger.warning("exec_skip_invalid_market_id", signal_id=signal_id)
             return
 
+        from app.services.safety.execution_safety_gate import (
+            execution_safety_gate, ExecutionContext,
+        )
+        drift_score = data.get("drift_score", 0.0)
+        stability_score = data.get("stability_score", 50.0)
+        risk_flags = data.get("risk_flags", [])
+        gate_ctx = ExecutionContext(
+            position_size_eur=float(size),
+            portfolio_exposure=0.0,
+            drawdown=0.0,
+            regime_confidence=float(confidence),
+            drift_score=float(drift_score),
+            stability_score=float(stability_score),
+            control_state="pre_trade",
+            risk_flags=list(risk_flags) if risk_flags else [],
+        )
+        gate_decision = execution_safety_gate.validate(gate_ctx)
+        if not gate_decision.allowed:
+            reason_str = "; ".join(gate_decision.reason)
+            logger.warning("exec_safety_gate_blocked", signal_id=signal_id, reasons=reason_str)
+            await inc_execution_failure()
+            await EventBus.publish(
+                "trade:execution",
+                "trade.failed",
+                self.name,
+                {"signal_id": signal_id, "error": f"safety_gate_blocked:{reason_str}"},
+                correlation_id=correlation_id,
+            )
+            await self.log_event("trade_failed", {"signal_id": signal_id, "error": f"safety_gate_blocked:{reason_str}"}, correlation_id=correlation_id)
+            return
+
         trading_allowed = await self._check_risk_overlay()
         if not trading_allowed:
             await inc_execution_failure()

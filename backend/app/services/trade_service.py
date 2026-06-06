@@ -21,6 +21,13 @@ FORCE_TRADING_DISABLED = bool(settings.FORCE_TRADING_DISABLED)
 MICRO_LIVE_SAFE_MODE = bool(settings.MICRO_LIVE_SAFE_MODE)
 
 
+class SystemHaltException(Exception):
+    """Raised when a critical infrastructure component (Redis/Valkey)
+    is unavailable and safety cannot be guaranteed. This is a fail-closed
+    behaviour — the system halts rather than trading without safety checks."""
+    pass
+
+
 class TradeService:
     def __init__(self, db: AsyncSession):
         self.db = db
@@ -70,10 +77,12 @@ class TradeService:
                 if not remote_state.get("tradingEnabled", True):
                     raise TradeExecutionError("Trading disabled by remote control.")
         except Exception as e:
-            # Redis failure should not block trading if not explicitly disabled
-            # but we log it. In a strict environment, we might fail-closed.
-            # For now, we continue but log the error.
-            logger.warning("failed_to_check_remote_state", error=str(e))
+            logger.critical("state_store_unavailable_trading_halted", error=str(e))
+            raise SystemHaltException(
+                "STATE STORE FAILURE -> TRADING HALTED. "
+                "Cannot verify remote kill switch state. "
+                "Fail-closed: trading blocked until state store is recovered."
+            ) from e
 
         # Strict Confidence Resolution: None is treated as 0.0 for maximum safety (fail-closed)
         resolved_confidence = float(request.confidence) if request.confidence is not None else 0.0
@@ -133,6 +142,27 @@ class TradeService:
         from app.core.timing import record_latency
         decision_ms = (__import__("time").perf_counter_ns() - _e2e_start) / 1_000_000
         record_latency("event_to_execution", decision_ms)
+
+        from app.services.safety.execution_safety_gate import (
+            execution_safety_gate, ExecutionContext,
+        )
+        gate_ctx = ExecutionContext(
+            position_size_eur=float(request.size),
+            portfolio_exposure=0.0,
+            drawdown=0.0,
+            regime_confidence=resolved_confidence,
+            drift_score=0.0,
+            stability_score=50.0,
+            control_state="pre_trade",
+            risk_flags=[],
+        )
+        gate_decision = execution_safety_gate.validate(gate_ctx)
+        if not gate_decision.allowed:
+            from app.services.pipeline_metrics import inc_execution_failure
+            await inc_execution_failure()
+            raise TradeExecutionError(
+                f"Execution safety gate blocked: {'; '.join(gate_decision.reason)}"
+            )
 
         from app.services.portfolio_allocator import PortfolioAllocator
         allocator = PortfolioAllocator(self.db)

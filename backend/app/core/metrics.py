@@ -80,3 +80,14 @@ portfolio_stability_score = Gauge("polymarket_portfolio_stability_score", "Portf
 allocation_drift_events = Counter("polymarket_allocation_drift_events_total", "Allocation drift events detected")
 feedback_dampening_adjustments = Counter("polymarket_feedback_dampening_adjustments_total", "Feedback dampening adjustments applied")
 regime_stability_updates = Counter("polymarket_regime_stability_updates_total", "Regime stability updates applied")
+
+# ── Execution Safety Gate metrics ─────────────────────
+execution_blocks_total = Counter("polymarket_execution_blocks_total", "Total trades blocked by execution safety gate")
+execution_allowed_total = Counter("polymarket_execution_allowed_total", "Total trades allowed by execution safety gate")
+execution_block_reason_counter = Counter("polymarket_execution_block_reason", "Block reasons from execution safety gate", ["reason"])
+
+# ── Phase 0 Audit v2 metrics ──────────────────────────
+audit_v2_runs_total = Counter("polymarket_audit_v2_runs_total", "Total audit v2 pipeline runs")
+stress_scenarios_executed_total = Counter("polymarket_stress_scenarios_executed_total", "Stress scenarios executed", ["scenario_type"])
+feedback_cycles_detected_total = Gauge("polymarket_feedback_cycles_detected_total", "Feedback cycles detected")
+production_gate_score = Gauge("polymarket_production_gate_score", "Production gate overall score")
