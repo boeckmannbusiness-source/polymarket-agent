@@ -1,4 +1,5 @@
 import asyncio
+import uuid
 from uuid import UUID
 
 from sqlalchemy import select
@@ -87,9 +88,39 @@ class ExecutionAgent(BaseAgent):
             return False
         return True
 
+    async def _log_shadow_decision(self, data: dict, decision: str, reasons: list[str], correlation_id: str | None = None):
+        try:
+            from app.database import async_session_factory
+            from app.models.shadow_decision_log import ShadowDecisionLog
+            async with async_session_factory() as db:
+                log_entry = ShadowDecisionLog(
+                    id=uuid.uuid4(),
+                    market_id=str(data.get("market_id", "")),
+                    strategy_id=data.get("strategy", ""),
+                    signal_source=data.get("signal_source", ""),
+                    regime=data.get("regime", ""),
+                    regime_confidence=float(data.get("confidence", 0.0)),
+                    expected_return=float(data.get("expected_return", 0.0)),
+                    optimization_weight=float(data.get("optimization_weight", 0.0)),
+                    stability_score=float(data.get("stability_score", 50.0)),
+                    drift_score=float(data.get("drift_score", 0.0)),
+                    exposure_level=float(data.get("exposure_level", 0.0)),
+                    safety_gate_decision=decision,
+                    approval_reason="; ".join(reasons) if decision == "SHADOW_APPROVED" else "",
+                    rejection_reason="; ".join(reasons) if decision == "SHADOW_BLOCKED" else "",
+                    signal_id=str(data.get("signal_id", "")),
+                )
+                db.add(log_entry)
+                await db.commit()
+        except Exception as e:
+            logger.warning("shadow_decision_log_failed", error=str(e))
+
     async def execute_trade(self, data: dict, correlation_id: str | None = None):
         from app.core.system_mode import get_mode_manager
-        if not get_mode_manager().can_execute_trades():
+        mode_mgr = get_mode_manager()
+        is_shadow = mode_mgr.is_shadow()
+
+        if not mode_mgr.can_execute_trades() and not is_shadow:
             signal_id = data["signal_id"]
             logger.warning("exec_blocked_system_mode", signal_id=signal_id)
             await inc_execution_failure()
@@ -135,6 +166,8 @@ class ExecutionAgent(BaseAgent):
         drift_score = data.get("drift_score", 0.0)
         stability_score = data.get("stability_score", 50.0)
         risk_flags = data.get("risk_flags", [])
+        regime = data.get("regime", "")
+        expected_return = data.get("expected_return", 0.0)
         gate_ctx = ExecutionContext(
             position_size_eur=float(size),
             portfolio_exposure=0.0,
@@ -144,8 +177,45 @@ class ExecutionAgent(BaseAgent):
             stability_score=float(stability_score),
             control_state="pre_trade",
             risk_flags=list(risk_flags) if risk_flags else [],
+            market_id=str(market_id),
+            strategy_id=strategy,
+            signal_source=data.get("signal_source", ""),
+            regime=regime,
+            expected_return=float(expected_return),
+            optimization_weight=float(data.get("optimization_weight", 0.0)),
+            signal_id=str(signal_id),
         )
         gate_decision = execution_safety_gate.validate(gate_ctx)
+
+        if is_shadow:
+            shadow_dec = gate_decision.shadow_decision
+            await self._log_shadow_decision(data, shadow_dec, gate_decision.reason, correlation_id)
+            logger.info(
+                "exec_shadow_decision",
+                signal_id=signal_id,
+                shadow_decision=shadow_dec,
+                reasons=gate_decision.reason,
+            )
+            if shadow_dec == "SHADOW_BLOCKED":
+                await EventBus.publish(
+                    "trade:execution",
+                    "trade.shadow_blocked",
+                    self.name,
+                    {"signal_id": signal_id, "market_id": market_id, "strategy": strategy,
+                     "shadow_decision": shadow_dec, "reasons": gate_decision.reason},
+                    correlation_id=correlation_id,
+                )
+            else:
+                await EventBus.publish(
+                    "trade:execution",
+                    "trade.shadow_approved",
+                    self.name,
+                    {"signal_id": signal_id, "market_id": market_id, "strategy": strategy,
+                     "shadow_decision": shadow_dec},
+                    correlation_id=correlation_id,
+                )
+            return
+
         if not gate_decision.allowed:
             reason_str = "; ".join(gate_decision.reason)
             logger.warning("exec_safety_gate_blocked", signal_id=signal_id, reasons=reason_str)

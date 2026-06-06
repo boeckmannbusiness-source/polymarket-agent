@@ -31,6 +31,7 @@ def get_mode_manager() -> "ModeManager":
 
 class SystemMode(str, enum.Enum):
     NORMAL = "normal"
+    SHADOW = "shadow"
     DEGRADED = "degraded"
     PROTECTED = "protected"
     READ_ONLY = "read_only"
@@ -53,7 +54,7 @@ class SystemMode(str, enum.Enum):
         return order.index(self) < order.index(other)
 
 
-_MODE_ORDER = [SystemMode.NORMAL, SystemMode.DEGRADED, SystemMode.PROTECTED, SystemMode.READ_ONLY, SystemMode.EMERGENCY_STOP]
+_MODE_ORDER = [SystemMode.NORMAL, SystemMode.SHADOW, SystemMode.DEGRADED, SystemMode.PROTECTED, SystemMode.READ_ONLY, SystemMode.EMERGENCY_STOP]
 
 
 @dataclass
@@ -320,6 +321,9 @@ class ModeManager:
 
     def can_execute_trades(self) -> bool:
         return self._mode == SystemMode.NORMAL
+
+    def is_shadow(self) -> bool:
+        return self._mode == SystemMode.SHADOW
 
     def can_recover(self) -> bool:
         return self._mode not in (SystemMode.EMERGENCY_STOP, SystemMode.READ_ONLY)

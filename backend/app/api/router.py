@@ -20,6 +20,9 @@ from app.api import research_memory as research_memory_router
 from app.api import research_pipeline as research_pipeline_router
 from app.api import intelligence as intelligence_router
 from app.api import optimization as optimization_router
+from app.api import shadow_validation as shadow_validation_router
+from app.api import audit_v2 as audit_v2_router
+from app.api import audit_v3 as audit_v3_router
 
 router = APIRouter()
 
@@ -43,6 +46,8 @@ router.include_router(events_router.router, prefix="/events", tags=["events"])
 router.include_router(control_router.router, prefix="/control", tags=["control"])
 router.include_router(incidents_router.router, prefix="/incidents", tags=["incidents"])
 router.include_router(audit_router.router, prefix="/audit", tags=["audit"])
+router.include_router(audit_v2_router.router, prefix="/audit", tags=["audit"])
+router.include_router(audit_v3_router.router, prefix="/audit", tags=["audit"])
 router.include_router(operations_router.router, prefix="/operations", tags=["operations"])
 router.include_router(shadow_router.router, prefix="/shadow", tags=["shadow"])
 router.include_router(shadow_analytics_router.router, prefix="/shadow", tags=["shadow"])
@@ -55,3 +60,4 @@ router.include_router(research_memory_router.router, tags=["research_memory"])
 router.include_router(research_pipeline_router.router, tags=["research_pipeline"])
 router.include_router(intelligence_router.router, tags=["intelligence"])
 router.include_router(optimization_router.router, prefix="/optimization", tags=["optimization"])
+router.include_router(shadow_validation_router.router, prefix="/shadow-validation", tags=["shadow_validation"])

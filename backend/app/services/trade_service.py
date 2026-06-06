@@ -62,6 +62,14 @@ class TradeService:
 
     async def create_trade(self, request: TradeCreateRequest) -> Trade:
         _e2e_start = __import__("time").perf_counter_ns()
+
+        from app.core.system_mode import get_mode_manager
+        try:
+            if get_mode_manager().is_shadow():
+                raise TradeExecutionError("Shadow mode active. No trades may be created.")
+        except RuntimeError:
+            pass
+
         if self._emergency_stop:
             raise TradeExecutionError("Emergency stop is active. No trades allowed.")
 
@@ -155,6 +163,9 @@ class TradeService:
             stability_score=50.0,
             control_state="pre_trade",
             risk_flags=[],
+            market_id=str(request.market_id),
+            strategy_id=request.agent_id or "unknown",
+            signal_id=str(request.signal_id) if request.signal_id else "",
         )
         gate_decision = execution_safety_gate.validate(gate_ctx)
         if not gate_decision.allowed:

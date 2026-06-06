@@ -60,6 +60,9 @@ class Settings(BaseSettings):
     ZAI_DEFAULT_MODEL: str = "z-ai-model"
     GROQ_API_KEY: str = ""
     GROQ_DEFAULT_MODEL: str = "llama-3.3-70b-versatile"
+    BLOCKRUN_API_KEY: str = "not-required"
+    BLOCKRUN_BASE_URL: str = "https://blockrun.ai/api/v1"
+    BLOCKRUN_DEFAULT_MODEL: str = "nvidia/deepseek-v4-flash"
 
     # Database
     DATABASE_URL: str = "postgresql+asyncpg://user:password@host:5432/polymarket"
@@ -94,6 +97,9 @@ class Settings(BaseSettings):
 
     METRICS_ENABLED: bool = True
     HEARTBEAT_INTERVAL_SECONDS: int = 30
+
+    # Shadow mode
+    SHADOW_MODE: bool = False
 
     # Kill switch
     FORCE_TRADING_DISABLED: bool = False

@@ -75,6 +75,17 @@ MODE_CONTEXTS: dict[str, ModeContext] = {
         cb_failure_tolerance=10,
         evaluator_sensitivity=1.0,
     ),
+    "shadow": ModeContext(
+        name="SHADOW",
+        db_pool_warning=0.70,
+        db_pool_critical=0.85,
+        redis_memory_warning=0.70,
+        redis_memory_critical=0.85,
+        stream_warning_ratio=0.70,
+        stream_critical_ratio=0.90,
+        cb_failure_tolerance=10,
+        evaluator_sensitivity=1.0,
+    ),
     "degraded": ModeContext(
         name="DEGRADED",
         db_pool_warning=0.80,
@@ -124,6 +135,7 @@ MODE_CONTEXTS: dict[str, ModeContext] = {
 
 _MIN_MODE_HOLD_TIME: dict[str, float] = {
     "normal": 0.0,
+    "shadow": 0.0,
     "degraded": 60.0,
     "protected": 120.0,
     "read_only": 300.0,

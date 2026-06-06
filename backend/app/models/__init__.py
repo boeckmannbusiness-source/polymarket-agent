@@ -19,6 +19,7 @@ from .portfolio_audit_log import PortfolioAuditLog
 from .benchmark_price import BenchmarkPrice
 from .exchange_order import ExchangeOrder
 from .fill import Fill
+from .shadow_decision_log import ShadowDecisionLog
 
 __all__ = [
     "Market",
@@ -51,4 +52,5 @@ __all__ = [
     "BenchmarkPrice",
     "ExchangeOrder",
     "Fill",
+    "ShadowDecisionLog",
 ]

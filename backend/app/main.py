@@ -99,6 +99,16 @@ async def lifespan(app: FastAPI):
         await asyncio.wait_for(_mode_manager.load_from_redis(), timeout=10)
     except Exception:
         logger.warning("mode_manager_load_failed")
+
+    if settings.SHADOW_MODE:
+        await _mode_manager.set_manual_override(
+            mode=SystemMode.SHADOW,
+            reason="shadow_mode_enabled_by_config",
+            operator="system",
+            ttl_seconds=259200,
+        )
+        logger.warning("system_started_in_shadow_mode")
+
     set_global_manager(_mode_manager)
     _wire_mode_api(_mode_manager)
 
@@ -220,6 +230,15 @@ async def lifespan(app: FastAPI):
     bg_tasks.append(asyncio.create_task(_periodic_mode_evaluator(), name="mode_evaluator"))
     logger.info("mode_evaluator_started")
 
+    # ── Shadow validation initialisation ───────────────
+    from app.services.validation.shadow_validation_service import shadow_validation_service as _shadow_val_svc
+    try:
+        async with async_session_factory() as _init_svdb:
+            await _shadow_val_svc.start_run(_init_svdb)
+        logger.info("shadow_validation_initialised")
+    except Exception as e:
+        logger.warning("shadow_validation_init_failed", error=str(e))
+
     # ── Scheduler registration ─────────────────────────
     from app.services.scheduler.task_scheduler import scheduler as _scheduler
     from app.services.risk.circuit_breakers import cb_system as _cb_system, register_default_breakers
@@ -287,6 +306,20 @@ async def lifespan(app: FastAPI):
             logger.warning("control_cycle_error", exc_info=True)
 
     await _scheduler.register_job("portfolio_control", 86400, _control_cycle)  # 24h
+
+    # ── Shadow validation monitor ────────────────────────
+    from app.services.validation.shadow_validation_service import shadow_validation_service as _shadow_val_svc
+
+    async def _shadow_validation_cycle():
+        try:
+            from app.database import async_session_factory
+            async with async_session_factory() as _svdb:
+                metrics = await _shadow_val_svc.get_execution_metrics(_svdb)
+                logger.info("shadow_validation_metrics", **metrics)
+        except Exception:
+            logger.warning("shadow_validation_cycle_error", exc_info=True)
+
+    await _scheduler.register_job("shadow_validation_monitor", 300, _shadow_validation_cycle)  # 5min
 
     # Keep original background task for backward compat during migration
     bg_tasks.append(asyncio.create_task(monitoring_worker.run(), name="monitoring_worker"))
