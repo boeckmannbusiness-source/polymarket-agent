@@ -91,3 +91,12 @@ audit_v2_runs_total = Counter("polymarket_audit_v2_runs_total", "Total audit v2 
 stress_scenarios_executed_total = Counter("polymarket_stress_scenarios_executed_total", "Stress scenarios executed", ["scenario_type"])
 feedback_cycles_detected_total = Gauge("polymarket_feedback_cycles_detected_total", "Feedback cycles detected")
 production_gate_score = Gauge("polymarket_production_gate_score", "Production gate overall score")
+
+# ── Phase 0.5 Audit v3 metrics ──────────────────────
+audit_v3_runs_total = Counter("polymarket_audit_v3_runs_total", "Total audit v3 micro-capital readiness pipeline runs")
+audit_v3_execution_score = Gauge("polymarket_audit_v3_execution_score", "Execution safety score (0-100)")
+audit_v3_capital_score = Gauge("polymarket_audit_v3_capital_score", "Capital protection score (0-100)")
+audit_v3_fail_closed_score = Gauge("polymarket_audit_v3_fail_closed_score", "Fail-closed score (0-100)")
+audit_v3_runtime_score = Gauge("polymarket_audit_v3_runtime_score", "Runtime enforcement score (0-100)")
+audit_v3_operational_score = Gauge("polymarket_audit_v3_operational_score", "Operational readiness score (0-100)")
+audit_v3_gate_score = Gauge("polymarket_audit_v3_gate_score", "Micro-capital readiness gate overall score")

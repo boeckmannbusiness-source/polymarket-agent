@@ -469,6 +469,27 @@ export const api = {
     run: () => fetchAPI<any>("/control/portfolio/run", { method: "POST" }),
   },
 
+  // ── Audit v2 ────────────────────────────────
+  audit: {
+    systemSafety: () => fetchAPI<any>("/audit/safety/system"),
+    dataIntegrity: () => fetchAPI<any>("/audit/safety/data"),
+    feedbackCycles: () => fetchAPI<any>("/audit/safety/cycles"),
+    stressSafety: () => fetchAPI<any>("/audit/safety/stress"),
+    readiness: () => fetchAPI<any>("/audit/safety/readiness"),
+    run: () => fetchAPI<any>("/audit/safety/run", { method: "POST" }),
+  },
+
+  // ── Audit v3 (Micro-Capital Readiness) ──────────
+  microCapital: {
+    executionSafety: () => fetchAPI<any>("/audit/micro-capital/execution"),
+    capitalProtection: () => fetchAPI<any>("/audit/micro-capital/capital"),
+    failClosed: () => fetchAPI<any>("/audit/micro-capital/fail-closed"),
+    runtimeEnforcement: () => fetchAPI<any>("/audit/micro-capital/runtime"),
+    operationalReadiness: () => fetchAPI<any>("/audit/micro-capital/operational"),
+    readiness: () => fetchAPI<any>("/audit/micro-capital/readiness"),
+    run: () => fetchAPI<any>("/audit/micro-capital/run", { method: "POST" }),
+  },
+
   researchAgents: {
     signals: (lifecycle?: string) =>
       fetchAPI<{ signals: any[] }>(`/research-agents/signals${lifecycle ? `?lifecycle=${lifecycle}` : ""}`),

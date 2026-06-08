@@ -1,26 +1,41 @@
+import asyncio
 import redis.asyncio as redis
+from redis.asyncio.connection import ConnectionPool, MaxConnectionsError
 
 from app.config import settings
 
 
-redis_client: redis.Redis | None = None
+class _BlockingPool(ConnectionPool):
+    async def get_connection(self, command_name=None, *keys, **options):
+        while True:
+            try:
+                return await super().get_connection(command_name, *keys, **options)
+            except MaxConnectionsError:
+                await asyncio.sleep(0.05)
+
+
+_pool: _BlockingPool | None = None
+_pool_lock = asyncio.Lock()
 
 
 async def get_redis() -> redis.Redis:
-    global redis_client
-    if redis_client is None:
-        redis_client = redis.from_url(
-            settings.REDIS_URL,
-            max_connections=settings.REDIS_MAX_CONNECTIONS,
-            decode_responses=True,
-            socket_connect_timeout=5,
-            socket_timeout=10,
-        )
-    return redis_client
+    global _pool
+    if _pool is None:
+        async with _pool_lock:
+            if _pool is None:
+                _pool = _BlockingPool.from_url(
+                    settings.REDIS_URL,
+                    max_connections=8,
+                    decode_responses=True,
+                    socket_connect_timeout=10,
+                    socket_timeout=30,
+                    retry_on_timeout=True,
+                )
+    return redis.Redis(connection_pool=_pool)
 
 
 async def close_redis():
-    global redis_client
-    if redis_client:
-        await redis_client.aclose()
-        redis_client = None
+    global _pool
+    if _pool:
+        await _pool.aclose()
+        _pool = None

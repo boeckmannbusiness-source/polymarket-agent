@@ -5,6 +5,7 @@ from app.llm.ollama import OllamaProvider
 from app.llm.mistral import MistralProvider
 from app.llm.zai import ZAIProvider
 from app.llm.groq import GroqProvider
+from app.llm.blockrun import BlockrunProvider
 from app.llm.fallback import FallbackProvider
 
 
@@ -16,6 +17,7 @@ def get_llm_provider(provider: str | None = None) -> BaseLLMProvider:
         "mistral": MistralProvider,
         "zai": ZAIProvider,
         "groq": GroqProvider,
+        "blockrun": BlockrunProvider,
     }
     if provider == "fallback":
         return FallbackProvider()
@@ -33,6 +35,7 @@ __all__ = [
     "MistralProvider",
     "ZAIProvider",
     "GroqProvider",
+    "BlockrunProvider",
     "FallbackProvider",
     "get_llm_provider",
 ]

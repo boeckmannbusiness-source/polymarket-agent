@@ -290,3 +290,51 @@ export function useControlPortfolioDrift() {
 export function useControlPortfolioStability() {
   return useData(() => api.controlPortfolio.stability(), 120_000);
 }
+
+// ── Audit v2 hooks ─────────────────────────────
+
+export function useSystemSafety() {
+  return useData(() => api.audit.systemSafety(), 120_000);
+}
+
+export function useDataIntegrity() {
+  return useData(() => api.audit.dataIntegrity(), 120_000);
+}
+
+export function useFeedbackCycles() {
+  return useData(() => api.audit.feedbackCycles(), 120_000);
+}
+
+export function useStressSafety() {
+  return useData(() => api.audit.stressSafety(), 120_000);
+}
+
+export function useReadiness() {
+  return useData(() => api.audit.readiness(), 120_000);
+}
+
+// ── Audit v3 hooks ─────────────────────────────
+
+export function useExecutionSafety() {
+  return useData(() => api.microCapital.executionSafety(), 120_000);
+}
+
+export function useCapitalProtection() {
+  return useData(() => api.microCapital.capitalProtection(), 120_000);
+}
+
+export function useFailClosed() {
+  return useData(() => api.microCapital.failClosed(), 120_000);
+}
+
+export function useRuntimeEnforcement() {
+  return useData(() => api.microCapital.runtimeEnforcement(), 120_000);
+}
+
+export function useOperationalReadiness() {
+  return useData(() => api.microCapital.operationalReadiness(), 120_000);
+}
+
+export function useMicroCapitalReadiness() {
+  return useData(() => api.microCapital.readiness(), 120_000);
+}

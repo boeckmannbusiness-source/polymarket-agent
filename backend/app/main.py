@@ -10,6 +10,7 @@ from app.database import init_db
 from app.redis import close_redis
 from app.ingesters.polymarket_rest import PolymarketRESTIngester
 from app.ingesters.polymarket_ws import PolymarketWSIngester
+from app.ingesters.polygon_rpc import PolygonRPCListener
 from app.agents.orchestrator import Orchestrator
 from app.services.event_bridge import EventPersistenceBridge
 from app.services.exit_engine import ExitEngine
@@ -34,6 +35,7 @@ from app.api.system import set_mode_manager as _wire_mode_api
 
 _mode_manager: ModeManager = ModeManager()
 _ws_ingester: PolymarketWSIngester | None = None
+_polygon_rpc: PolygonRPCListener | None = None
 _bridge: EventPersistenceBridge | None = None
 _exit_engine: ExitEngine | None = None
 _risk_overlay: RiskOverlay | None = None
@@ -53,7 +55,7 @@ _system_health_store: SystemHealthStore | None = None
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    global _ws_ingester, _bridge, _exit_engine, _risk_overlay, _strategy_guardian, _portfolio_allocator
+    global _ws_ingester, _polygon_rpc, _bridge, _exit_engine, _risk_overlay, _strategy_guardian, _portfolio_allocator
     global _edge_reality_engine, _overfitting_detector, _survivability_simulator, _strategy_pruning_engine, _capital_efficiency_engine
     global _walk_forward_engine, _shadow_trading_service, _stress_test_engine, _live_state_machine, _system_health_store
     setup_logging()
@@ -67,6 +69,10 @@ async def lifespan(app: FastAPI):
     rest_ingester = PolymarketRESTIngester(poll_interval=60)
     _ws_ingester = PolymarketWSIngester()
     ws_ingester = _ws_ingester
+    _polygon_rpc = PolygonRPCListener(poll_interval=15)
+    from web3.middleware import ExtraDataToPOAMiddleware
+    _polygon_rpc.w3.middleware_onion.inject(ExtraDataToPOAMiddleware, layer=0)
+    polygon_rpc = _polygon_rpc
     _bridge = EventPersistenceBridge()
     bridge = _bridge
     orchestrator = Orchestrator()
@@ -118,6 +124,9 @@ async def lifespan(app: FastAPI):
     bg_tasks.append(asyncio.create_task(ws_ingester.run(), name="ws_ingester"))
     logger.info("ws_ingester_started")
 
+    bg_tasks.append(asyncio.create_task(polygon_rpc.run(), name="polygon_rpc"))
+    logger.info("polygon_rpc_started")
+
     bg_tasks.append(asyncio.create_task(bridge.start(), name="event_bridge"))
     logger.info("event_bridge_started")
 
@@ -127,6 +136,24 @@ async def lifespan(app: FastAPI):
     try:
         from app.redis import get_redis
         r = await get_redis()
+
+        if settings.SHADOW_MODE:
+            for stream, group in [
+                ("market:data", "persistence_bridge"),
+                ("market:data", "whale_agent"),
+                ("wallet:trade", "signal_agent"),
+                ("signal:generated", "risk_agent"),
+                ("trade:request", "execution_agent"),
+            ]:
+                try:
+                    await r.xgroup_destroy(stream, group)
+                except Exception:
+                    pass
+                try:
+                    await r.xgroup_create(stream, group, id="$", mkstream=True)
+                    logger.info("shadow_consumer_group_reset", stream=stream, group=group)
+                except Exception:
+                    pass
 
         # ── Redis configuration validation ─────────────────────
         try:
@@ -364,6 +391,7 @@ async def lifespan(app: FastAPI):
     logger.info("shutting_down")
     await rest_ingester.stop()
     await ws_ingester.stop()
+    await polygon_rpc.stop()
     await bridge.stop()
     await orchestrator.stop_all()
     from app.services.scheduler.task_scheduler import scheduler as _scheduler
@@ -460,9 +488,16 @@ _PEL_SEMAPHORE = asyncio.Semaphore(3)
 
 async def _periodic_pel_recovery():
     import asyncio
+    from datetime import datetime, timezone, timedelta
     from app.core.recovery import recover_pending_messages
     from app.core.metrics import recovery_loop_errors_total, recovery_loop_recoveries_total, recovery_stuck_count
     from app.core.system_mode import get_mode_manager
+    from app.database import async_session_factory
+    from app.models import Trade
+    from app.services.pipeline_metrics import inc_pending_trade_timeout
+    from sqlalchemy import select
+
+    _PENDING_TIMEOUT_SECONDS = 3600
 
     _PEL_GROUPS = [
         ("market:data", "whale_agent", "whale_1"),
@@ -480,7 +515,7 @@ async def _periodic_pel_recovery():
                 continue
 
             async with async_session_factory() as db:
-                cutoff = datetime.now(timezone.utc) - timedelta(seconds=PENDING_TIMEOUT_SECONDS)
+                cutoff = datetime.now(timezone.utc) - timedelta(seconds=_PENDING_TIMEOUT_SECONDS)
                 result = await db.execute(
                     select(Trade).where(
                         Trade.status == "pending",
@@ -654,7 +689,7 @@ async def _periodic_risk_overlay_check():
     from app.database import async_session_factory
     from app.core.heartbeat import touch_loop_heartbeat
 
-    await asyncio.sleep(20)
+    await asyncio.sleep(300)
     while True:
         try:
             touch_loop_heartbeat("risk_overlay")
@@ -793,7 +828,7 @@ async def _periodic_state_machine_check():
     from app.services.pipeline_metrics import set_phase5_metrics
     from app.core.heartbeat import touch_loop_heartbeat
 
-    await asyncio.sleep(45)
+    await asyncio.sleep(300)
     while True:
         try:
             touch_loop_heartbeat("state_machine")

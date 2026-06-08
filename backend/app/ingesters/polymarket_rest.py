@@ -17,7 +17,7 @@ class PolymarketRESTIngester(BaseIngester):
     def __init__(self, poll_interval: int = 60):
         super().__init__()
         self.poll_interval = poll_interval
-        self.client = httpx.AsyncClient(timeout=30.0)
+        self.client = httpx.AsyncClient(timeout=30.0, limits=httpx.Limits(max_connections=3, max_keepalive_connections=2))
         self._tasks: list[asyncio.Task] = []
 
     async def run(self):
@@ -77,6 +77,8 @@ class PolymarketRESTIngester(BaseIngester):
         if not condition_id:
             return
 
+        import json as _json
+
         title = data.get("question") or data.get("title")
         slug = data.get("slug")
         description = data.get("description")
@@ -89,7 +91,6 @@ class PolymarketRESTIngester(BaseIngester):
             if isinstance(raw_ids, list):
                 clob_token_ids = [str(t) for t in raw_ids if t]
             elif isinstance(raw_ids, str):
-                import json as _json
                 try:
                     parsed = _json.loads(raw_ids)
                     clob_token_ids = [str(t) for t in parsed] if isinstance(parsed, list) else [raw_ids]
@@ -103,14 +104,24 @@ class PolymarketRESTIngester(BaseIngester):
 
         resolved = data.get("closed", False)
         resolution = data.get("resolvedOutcome") or data.get("resolution")
-        outcomes_list = outcomes if isinstance(outcomes, list) else []
         yes_price = None
-        if outcomes_list and len(outcomes_list) == 2:
-            yes_price = (
-                outcomes_list[0].get("price") if isinstance(outcomes_list[0], dict)
-                else outcomes_list[1].get("price") if isinstance(outcomes_list[1], dict)
-                else None
-            )
+        raw_prices = data.get("outcomePrices") or data.get("outcome_prices")
+        if raw_prices:
+            try:
+                prices = _json.loads(raw_prices) if isinstance(raw_prices, str) else raw_prices
+                if isinstance(prices, list) and len(prices) == 2:
+                    yes_price = float(prices[0])
+            except (ValueError, TypeError, _json.JSONDecodeError):
+                pass
+        if yes_price is None:
+            outcomes_list = _json.loads(outcomes) if isinstance(outcomes, str) else (outcomes if isinstance(outcomes, list) else [])
+            if len(outcomes_list) == 2:
+                try:
+                    prices = _json.loads(data.get("outcomePrices", "[]")) if isinstance(data.get("outcomePrices"), str) else data.get("outcomePrices", [])
+                    if isinstance(prices, list) and len(prices) == 2:
+                        yes_price = float(prices[0])
+                except (ValueError, TypeError, _json.JSONDecodeError):
+                    pass
 
         async with async_session_factory() as db:
             service = MarketService(db)

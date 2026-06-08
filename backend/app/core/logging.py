@@ -84,6 +84,15 @@ def setup_logging():
     )
 
     root_logger = logging.getLogger()
+    level = getattr(logging, settings.LOG_LEVEL, logging.WARNING)
+    root_logger.setLevel(level)
+    if not root_logger.handlers:
+        handler = logging.StreamHandler()
+        handler.setLevel(level)
+        handler.setFormatter(logging.Formatter("%(message)s"))
+        root_logger.addHandler(handler)
+    for handler in root_logger.handlers:
+        handler.setLevel(level)
     root_logger.addFilter(ContextFilter())
 
     return _suppressor

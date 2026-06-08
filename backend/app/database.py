@@ -36,6 +36,10 @@ async def get_db() -> AsyncSession:
 
 
 async def init_db():
+    try:
+        await engine.dispose()
+    except Exception:
+        pass
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
         # mode transitions table (created by metadata but ensure index)

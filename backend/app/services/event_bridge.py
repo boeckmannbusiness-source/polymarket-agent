@@ -175,10 +175,11 @@ class EventPersistenceBridge:
                     if success:
                         if self._circuit_breaker.state.name == "HALF_OPEN":
                             self._circuit_breaker.record_success()
-                        await EventBus.ack_message(r, "market:data", "persistence_bridge", msg["id"])
-                        self._processed += 1
                     else:
                         self._circuit_breaker.record_failure()
+                    await EventBus.ack_message(r, "market:data", "persistence_bridge", msg["id"])
+                    if success:
+                        self._processed += 1
             except asyncio.CancelledError:
                 break
             except Exception as e:

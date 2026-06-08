@@ -72,11 +72,14 @@ class PolymarketWSIngester(BaseIngester):
 
     async def _refresh_mappings(self):
         try:
+            from datetime import datetime, timezone, timedelta
             async with async_session_factory() as db:
                 result = await db.execute(
                     select(Market.condition_id, Market.clob_token_ids, Market.resolved)
                     .where(Market.resolved == False)
                     .where(Market.clob_token_ids.isnot(None))
+                    .where(Market.volume > 0)
+                    .where(Market.updated_at >= datetime.now(timezone.utc) - timedelta(days=30))
                 )
                 rows = result.all()
             new_asset_to_condition = {}
@@ -113,14 +116,17 @@ class PolymarketWSIngester(BaseIngester):
             return False
 
     async def connect(self):
-        self.ws = await websockets.connect(settings.POLYMARKET_WS_URL)
-        logger.info("ws_connected", url=settings.POLYMARKET_WS_URL)
+        self.ws = await websockets.connect(settings.POLYMARKET_WS_URL, ping_interval=None)
+        logger.warning("ws_connected", url=settings.POLYMARKET_WS_URL)
 
         # Clear reconnect-sensitive buffers
         self._last_raw_events.clear()
         self._live_traces.clear()
 
         await self._refresh_mappings()
+
+        # Allow connection to stabilize before subscribing
+        await asyncio.sleep(0.5)
         sub_ids = self._get_asset_ids()
         self._subscribed_assets = sub_ids
 
@@ -128,9 +134,16 @@ class PolymarketWSIngester(BaseIngester):
             chunk_size = 200
             for i in range(0, len(sub_ids), chunk_size):
                 chunk = sub_ids[i : i + chunk_size]
-                sub_formats = [
-                    {"type": "market", "assets_ids": chunk},
-                ]
+                is_first = i == 0
+                if is_first:
+                    sub_formats = [
+                        {"type": "market", "assets_ids": chunk},
+                        {"type": "market", "assets_ids": chunk, "custom_feature_enabled": True},
+                    ]
+                else:
+                    sub_formats = [
+                        {"operation": "subscribe", "assets_ids": chunk},
+                    ]
                 success = False
                 for fmt in sub_formats:
                     if await self._try_subscribe(fmt):
@@ -138,9 +151,12 @@ class PolymarketWSIngester(BaseIngester):
                         break
                 if not success:
                     logger.error("ws_subscribe_all_formats_failed", chunk_index=i // chunk_size)
-            logger.info("ws_subscribed", asset_count=len(sub_ids))
+                await asyncio.sleep(0.2)
+            logger.warning("ws_subscribed", asset_count=len(sub_ids))
         else:
             logger.warning("ws_no_assets_to_subscribe")
+            await self.ws.close()
+            self.ws = None
 
     # ── Lifecycle ────────────────────────────────────────────
 
@@ -168,8 +184,8 @@ class PolymarketWSIngester(BaseIngester):
         while self.running:
             try:
                 if self.ws and getattr(self.ws, 'close_code', None) is None:
-                    await self.ws.ping()
-                await asyncio.sleep(30)
+                    await self.ws.send("PING")
+                await asyncio.sleep(10)
             except Exception as e:
                 logger.error("heartbeat_failed", error=str(e))
                 await asyncio.sleep(5)
@@ -185,8 +201,8 @@ class PolymarketWSIngester(BaseIngester):
                     chunk_size = 200
                     for i in range(0, len(new_ids), chunk_size):
                         chunk = new_ids[i : i + chunk_size]
-                        for fmt in [{"type": "market", "assets_ids": chunk}]:
-                            await self._try_subscribe(fmt)
+                        await self._try_subscribe({"operation": "subscribe", "assets_ids": chunk})
+                        await asyncio.sleep(0.2)
                     self._subscribed_assets.extend(new_ids)
                     logger.info("ws_subscribed_new_assets", count=len(new_ids))
                 stale_count = len(self._subscribed_assets) - len(current_ids)
@@ -394,8 +410,9 @@ class PolymarketWSIngester(BaseIngester):
             try:
                 if self.ws is None or getattr(self.ws, 'close_code', None) is not None:
                     self._reconnect_count += 1
-                    logger.warning("ws_not_connected, reconnecting...", reconnect=self._reconnect_count)
-                    await asyncio.sleep(5)
+                    backoff = min(2 ** min(self._reconnect_count, 6), 60)
+                    logger.warning("ws_not_connected, reconnecting...", reconnect=self._reconnect_count, backoff=backoff)
+                    await asyncio.sleep(backoff)
                     try:
                         await self.connect()
                     except Exception as e:
@@ -403,55 +420,76 @@ class PolymarketWSIngester(BaseIngester):
                     await asyncio.sleep(1)
                     continue
 
-                message = await self.ws.recv()
+                message = await asyncio.wait_for(self.ws.recv(), timeout=60)
                 self._messages_received += 1
                 self._last_message_time = datetime.now(timezone.utc)
-                data = json.loads(message)
 
-                correlation_id = str(uuid.uuid4())
-                event_type = data.get("type") or data.get("event_type") or data.get("channel") or "unknown"
-                self._events_by_type[event_type] = self._events_by_type.get(event_type, 0) + 1
+                if not message:
+                    continue
+                if isinstance(message, str) and not message.strip():
+                    continue
+                if isinstance(message, bytes) and not message.strip():
+                    continue
 
-                if self._events_by_type[event_type] <= 3:
-                    logger.info("ws_new_event_type", type=event_type, sample_keys=list(data.keys())[:10], full_sample=str(data)[:300])
+                if isinstance(message, str) and message.strip() in ("PING", "PONG"):
+                    continue
+                try:
+                    raw_data = json.loads(message)
+                except json.JSONDecodeError:
+                    logger.warning("ws_non_json_message", type=type(message).__name__, content=str(message)[:200])
+                    continue
+                messages_to_process = raw_data if isinstance(raw_data, list) else [raw_data]
 
-                if event_type == "last_trade_price":
-                    self._parsed_events += 1
-                    self._store_raw_event(data, event_type, True, "parsed as trade")
-                    normalized = self._normalize_trade_event(data, event_type)
-                    if normalized:
-                        await self._publish_normalized(normalized, "trade", correlation_id=correlation_id)
-                    else:
+                for data in messages_to_process:
+                    if not isinstance(data, dict):
                         self._parse_failures += 1
-                        self._store_raw_event(data, event_type, False, "normalization_failed")
-                        await EventBus.publish("market:data", "trade", self.name, data, correlation_id=correlation_id)
+                        continue
 
-                elif event_type == "price_change":
-                    self._parsed_events += 1
-                    self._store_raw_event(data, event_type, True, "parsed as price_change")
-                    normalized_list = self._normalize_price_events(data)
-                    for normalized in normalized_list:
-                        await self._publish_normalized(normalized, "price_change", correlation_id=correlation_id)
-                    if not normalized_list:
-                        self._store_raw_event(data, event_type, False, "price_change_empty_or_bad_structure")
+                    correlation_id = str(uuid.uuid4())
+                    event_type = data.get("type") or data.get("event_type") or data.get("channel") or "unknown"
+                    self._events_by_type[event_type] = self._events_by_type.get(event_type, 0) + 1
 
-                elif event_type == "book":
-                    self._store_raw_event(data, event_type, True, "parsed as orderbook")
-                    await EventBus.publish("market:data", "orderbook_snapshot", self.name, data, correlation_id=correlation_id)
+                    if self._events_by_type[event_type] <= 3:
+                        logger.info("ws_new_event_type", type=event_type, sample_keys=list(data.keys())[:10], full_sample=str(data)[:300])
 
-                elif event_type in ("subscription", "subscribe", "ack", "error"):
-                    self._store_raw_event(data, event_type, True, f"system_message:{event_type}")
-                    logger.info("ws_system_msg", type=event_type, data=str(data)[:200])
+                    if event_type == "last_trade_price":
+                        self._parsed_events += 1
+                        self._store_raw_event(data, event_type, True, "parsed as trade")
+                        normalized = self._normalize_trade_event(data, event_type)
+                        if normalized:
+                            await self._publish_normalized(normalized, "trade", correlation_id=correlation_id)
+                        else:
+                            self._parse_failures += 1
+                            self._store_raw_event(data, event_type, False, "normalization_failed")
+                            await EventBus.publish("market:data", "trade", self.name, data, correlation_id=correlation_id)
 
-                else:
-                    self._store_raw_event(data, event_type, True, "unhandled_type")
-                    self._unknown_by_type[event_type] = self._unknown_by_type.get(event_type, 0) + 1
-                    await EventBus.publish("market:data", event_type, self.name, data, correlation_id=correlation_id)
+                    elif event_type == "price_change":
+                        self._parsed_events += 1
+                        self._store_raw_event(data, event_type, True, "parsed as price_change")
+                        normalized_list = self._normalize_price_events(data)
+                        for normalized in normalized_list:
+                            await self._publish_normalized(normalized, "price_change", correlation_id=correlation_id)
+                        if not normalized_list:
+                            self._store_raw_event(data, event_type, False, "price_change_empty_or_bad_structure")
 
-            except websockets.ConnectionClosed:
+                    elif event_type == "book":
+                        self._store_raw_event(data, event_type, True, "parsed as orderbook")
+                        await EventBus.publish("market:data", "orderbook_snapshot", self.name, data, correlation_id=correlation_id)
+
+                    elif event_type in ("subscription", "subscribe", "ack", "error"):
+                        self._store_raw_event(data, event_type, True, f"system_message:{event_type}")
+                        logger.info("ws_system_msg", type=event_type, data=str(data)[:200])
+
+                    else:
+                        self._store_raw_event(data, event_type, True, "unhandled_type")
+                        self._unknown_by_type[event_type] = self._unknown_by_type.get(event_type, 0) + 1
+                        await EventBus.publish("market:data", event_type, self.name, data, correlation_id=correlation_id)
+
+            except (websockets.ConnectionClosed, asyncio.TimeoutError):
                 self._reconnect_count += 1
-                logger.warning("ws_disconnected, reconnecting...", reconnect=self._reconnect_count)
-                await asyncio.sleep(5)
+                backoff = min(2 ** min(self._reconnect_count, 6), 60)
+                logger.warning("ws_disconnected, reconnecting...", reconnect=self._reconnect_count, backoff=backoff)
+                await asyncio.sleep(backoff)
                 try:
                     await self.connect()
                 except Exception as e:
@@ -462,8 +500,7 @@ class PolymarketWSIngester(BaseIngester):
 
     async def subscribe_assets(self, asset_ids: list[str]):
         if self.ws:
-            for fmt in [{"type": "market", "assets_ids": asset_ids}]:
-                await self._try_subscribe(fmt)
+            await self._try_subscribe({"operation": "subscribe", "assets_ids": asset_ids})
             self._subscribed_assets.extend(asset_ids)
             logger.info("subscribed_assets", count=len(asset_ids))
 

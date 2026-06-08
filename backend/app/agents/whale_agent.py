@@ -24,44 +24,47 @@ class WhaleAgent(BaseAgent):
                     event_type = msg.get("event_type", "")
                     correlation_id = msg.get("correlation_id")
 
-                    if event_type in ("onchain_trade", "trade"):
-                        wallet = data.get("from") or data.get("maker_address") or data.get("wallet")
-                        if wallet:
-                            async with async_session_factory() as db:
-                                service = WhaleService(db)
-                                wallet_obj = await service.upsert_wallet(wallet)
-                                trade = await service.record_trade(
-                                    wallet_address=wallet,
-                                    market_id=None,
-                                    outcome=data.get("outcome"),
-                                    side=data.get("side", "buy"),
-                                    size=float(data.get("value", data.get("size", 0)) or 0),
-                                    price=float(data.get("price", 0) or 0),
-                                    tx_hash=data.get("transaction_hash"),
-                                )
+                    try:
+                        if event_type in ("onchain_trade", "trade"):
+                            wallet = data.get("from") or data.get("maker_address") or data.get("wallet")
+                            if wallet:
+                                async with async_session_factory() as db:
+                                    service = WhaleService(db)
+                                    wallet_obj = await service.upsert_wallet(wallet)
+                                    trade = await service.record_trade(
+                                        wallet_address=wallet,
+                                        market_id=None,
+                                        outcome=data.get("outcome"),
+                                        side=data.get("side", "buy"),
+                                        size=float(data.get("value", data.get("size", 0)) or 0),
+                                        price=float(data.get("price", 0) or 0),
+                                        tx_hash=data.get("transaction_hash"),
+                                    )
 
-                                scores = await service.get_wallet_scores(wallet, score_type="overall")
-                                wallet_score = scores[0].score if scores else None
-                                wallet_win_rate = float(wallet_obj.win_rate) if wallet_obj.win_rate else None
+                                    scores = await service.get_wallet_scores(wallet, score_type="overall")
+                                    wallet_score = scores[0].score if scores else None
+                                    wallet_win_rate = float(wallet_obj.win_rate) if wallet_obj.win_rate else None
 
-                                await EventBus.publish(
-                                    "wallet:trade",
-                                    "wallet.trade.detected",
-                                    self.name,
-                                    {
-                                        "wallet": wallet,
-                                        "trade_id": trade.id,
-                                        "size": float(data.get("value", data.get("size", 0)) or 0),
-                                        "event_type": event_type,
-                                        "side": data.get("side", "buy"),
-                                        "price": float(data.get("price", 0) or 0),
-                                        "condition_id": data.get("condition_id", ""),
-                                        "outcome": data.get("outcome"),
-                                        "wallet_score": wallet_score,
-                                        "wallet_win_rate": wallet_win_rate,
-                                    },
-                                    correlation_id=correlation_id,
-                                )
+                                    await EventBus.publish(
+                                        "wallet:trade",
+                                        "wallet.trade.detected",
+                                        self.name,
+                                        {
+                                            "wallet": wallet,
+                                            "trade_id": trade.id,
+                                            "size": float(data.get("value", data.get("size", 0)) or 0),
+                                            "event_type": event_type,
+                                            "side": data.get("side", "buy"),
+                                            "price": float(data.get("price", 0) or 0),
+                                            "condition_id": data.get("condition_id", ""),
+                                            "outcome": data.get("outcome"),
+                                            "wallet_score": wallet_score,
+                                            "wallet_win_rate": wallet_win_rate,
+                                        },
+                                        correlation_id=correlation_id,
+                                    )
+                    except Exception as e:
+                        logger.error("whale_agent_process_error", error=str(e))
 
                     await EventBus.ack_message(r, "market:data", "whale_agent", msg["id"])
 
