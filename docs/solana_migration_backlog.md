@@ -1,22 +1,24 @@
-# Solana Migration Backlog (Revised: Research-First)
+# Solana Migration Backlog (Revised: Data-Centric)
 
-## Phase 1: Infrastructure & Alpha Validation (MVP v1)
-- [ ] **Data Ingestion:** Helius Webhook listener for on-chain swaps.
-- [ ] **Market Enrichment:** Birdeye API for real-time pricing and token data.
-- [ ] **DB Schema:** Deploy `SmartWallet` and `ShadowPosition` models.
-- [ ] **SmartWalletAgent:** Refactor to track metrics (ROI, Win Rate, Activity) and score wallets.
-- [ ] **Signal Generation:** Configure `SignalAgent` exclusively for Smart Wallet Following.
-- [ ] **Shadow Trading:** Implement `ShadowPortfolioService` with deterministic exit logic (TP/SL/Time).
-- [ ] **Alpha Validation:** Accumulate 100+ trades and evaluate against success benchmarks.
+## Phase 1: Infrastructure & Research (MVP v1)
+- [ ] **Data Ingestion:** Helius Webhook listener for token swaps.
+- [ ] **Market Enrichment:** Birdeye API for pricing and metadata.
+- [ ] **Discovery:** Implement `WalletDiscoveryService` to find candidate wallets.
+- [ ] **Dataset:** Deploy `ResearchTrade` model to log wallet activity ground-truth.
+- [ ] **Shadow Trading:** Implement `ShadowPortfolioService` with simulated costs (1.5% net).
+- [ ] **Metrics:** Develop Alpha Validation Dashboard with Profit Factor and Concentration KPIs.
 
-## Phase 2: Execution & Advanced Intelligence (Deferred)
-- [ ] **Wallet Clustering:** Sybil detection and cluster-based scoring.
+## Phase 2: Alpha Validation Gate
+- [ ] Accumulate 100+ shadow trades.
+- [ ] Evaluation against Benchmarks (Net ROI > 0, Win Rate > 55%, Profit Factor > 1.2).
+- [ ] Wallet Concentration Audit (< 25% from top wallet).
+- [ ] Go/No-Go Decision for Live Execution.
+
+## Phase 3: Execution Infrastructure (Deferred)
 - [ ] **Jupiter Adapter:** Implement Quote/Swap/Execute flow.
-- [ ] **Solana Signer:** Local Ed25519 key management.
 - [ ] **Jito Integration:** Bundle swaps with tips for MEV protection.
-- [ ] **Priority Fees:** Dynamic fee estimation for congestion handling.
-- [ ] **Advanced Strategies:** Re-enable Momentum Spike, Liquidity Vacuum, etc.
+- [ ] **Solana Signer:** Local Ed25519 key management.
+- [ ] **Clustering:** Advanced Sybil detection and wallet clustering.
 
-## Phase 3: Deployment
+## Phase 4: Deployment
 - [ ] Micro-capital live deployment (25€-100€).
-- [ ] Performance-based scaling.

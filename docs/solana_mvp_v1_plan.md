@@ -1,117 +1,95 @@
-# Solana MVP v1 Plan: Research & Shadow Trading (Focused)
+# Solana MVP v1 Plan: Alpha Research Platform (Data-Centric)
 
 ## Objective
-The primary goal of MVP v1 is to determine whether Smart Wallet tracking on Solana produces a statistically meaningful edge. We are building a research platform to validate alpha before any execution infrastructure is developed.
+Determine whether Solana "Smart Money" activity can generate profitable shadow trades. MVP v1 is a research platform designed to collect evidence and validate alpha before any execution infrastructure is built.
 
 ---
 
-## Architecture Changes
+## Architecture Changes (Evidence-Driven)
 
 ### Data Pipeline
 - **Helius Ingester:** Webhook-based ingestion of `onchain_trade` events.
-- **Birdeye Enrichment:** API-based enrichment for token prices and metadata.
-- **Event Bus:** Normalized Solana events published to `market:data`.
+- **Birdeye Enrichment:** Real-time pricing and token metadata enrichment.
+- **WalletDiscoveryService (NEW):** Identifies candidate wallets based on swap volume, early entry into trending tokens, and repeated success.
 
-### Agent & Service Logic
-- **SmartWalletAgent (fka WhaleAgent):** Refactored to track individual wallet performance metrics (Win Rate, ROI, Activity). Clustering and Sybil detection are **removed**.
-- **SignalAgent:** Simplified to output only "Smart Wallet Follow" signals. All technical and experimental strategies are **disabled**.
-- **RiskAgent:** Retained to enforce realistic position limits on shadow trades.
-- **ShadowPortfolioService:** The centerpiece of MVP v1. Responsible for simulated entry/exit, deterministic PnL tracking, and performance reporting.
+### Signal & Research Flow
+1. **Wallet Event** → **ResearchTrade Table** (Logs every action for ground-truth).
+2. **ResearchTrade** → **Shadow Trade** (Simulated entry/exit).
+3. **Outcome** → **Wallet Statistics** (Win Rate, ROI).
+4. **Wallet Statistics** → **ResearchScore** (Activity + Recent Success).
+
+### Agent Pivot
+- **SmartWalletAgent:** Collects evidence and updates `ResearchScore`. Does NOT block signals for new wallets (solves cold-start).
+- **ShadowPortfolioService:** Simulates trades with **real-world cost assumptions** (1% slippage, 0.5% fees).
+- **ExecutionAgent:** Deactivated.
 
 ---
 
 ## Database Changes
 
-### Updated Models
+### New Models
 
-#### SmartWallet
-- `address` (PK, string)
-- `trades_tracked` (int)
-- `win_rate` (float)
-- `roi_7d` (float)
-- `roi_30d` (float)
-- `avg_holding_duration` (interval)
-- `avg_trade_size_usd` (float)
-- `smart_wallet_score` (float)
-- `last_active_at` (datetime)
+#### ResearchTrade (The Ground-Truth Dataset)
+- `id` (PK, uuid)
+- `wallet_address` (string)
+- `mint_address` (string)
+- `timestamp` (datetime)
+- `price_at_detection` (float)
+- `price_1h`, `price_6h`, `price_24h`, `price_72h` (float, nullable)
+- `return_1h`, `return_6h`, `return_24h`, `return_72h` (float, nullable)
 
-#### ShadowPosition
+#### ShadowPosition (Net PnL Focused)
 - `id` (PK, uuid)
 - `mint_address` (string)
-- `symbol` (string)
 - `entry_timestamp` (datetime)
 - `entry_price_usd` (float)
-- `exit_timestamp` (datetime, nullable)
 - `exit_price_usd` (float, nullable)
-- `holding_duration` (interval, nullable)
 - `size_usd` (float)
-- `pnl_percent` (float, nullable)
-- `pnl_usd` (float, nullable)
-- `source_wallet_address` (string, FK)
-- `source_signal_id` (uuid, FK)
+- `gross_pnl_usd` (float)
+- `net_pnl_usd` (float) # After 1% slippage + 0.5% fees
 - `status` (string) # open, closed
 
 ---
 
-## SmartWalletScore v1
+## Simplified Scoring: ResearchScore
 
-Scoring is transparent and explainable:
-`SmartWalletScore = (WinRate * 0.40) + (ROI_Score * 0.35) + (Consistency_Score * 0.15) + (Activity_Score * 0.10)`
-
----
-
-## Deterministic Exit Rules
-
-To ensure a consistent and reliable dataset for evaluation, the `ShadowPortfolioService` will apply the following rules to every shadow trade:
-
-| Rule | Threshold |
-| :--- | :--- |
-| **Take Profit** | +25% |
-| **Stop Loss** | -15% |
-| **Max Holding Time** | 72 hours |
-
-*Trades will be closed automatically upon hitting whichever condition occurs first.*
+To avoid cold-start complexity, use an intentionally simple formula for MVP v1:
+`ResearchScore = ActivityScore + RecentSuccessScore`
 
 ---
 
-## Success Criteria (Revised)
+## Shadow Portfolio: Cost Simulation & Exits
 
-Validation requires a statistically robust dataset:
-- **Minimum Dataset:** 100+ completed shadow trades.
-
-**Success Benchmarks:**
-1. **Win Rate:** > 55%
-2. **Profit Factor:** > 1.20
-3. **Net ROI:** Positive after simulated fees and slippage.
-4. **Sharpe Ratio:** Positive and stable.
-5. **Wallet Diversification:** No single wallet may contribute > 25% of total profits.
+Every shadow trade assumes:
+- **Slippage:** 1.0%
+- **Execution Fees:** 0.5%
+- **TP/SL Rules:** +25% Take Profit / -15% Stop Loss / 72h Max Hold.
 
 ---
 
-## Milestones & Effort
-
-### Milestone 1: Core Data & Models (Effort: 3 days)
-- [ ] Helius Webhook listener & Birdeye pricing integration.
-- [ ] Deploy `SmartWallet` and `ShadowPosition` models.
-
-### Milestone 2: SmartWallet Scoring (Effort: 3 days)
-- [ ] Implement `SmartWalletAgent` metrics calculation (no clustering).
-- [ ] Transparent scoring formula implementation.
-
-### Milestone 3: Shadow Tracking (Effort: 4 days)
-- [ ] `ShadowPortfolioService` with deterministic exit logic.
-- [ ] Performance dashboard for shadow trade analytics.
-
-### Milestone 4: Alpha Observation (Effort: 2-4 weeks)
-- [ ] Accumulate 100+ shadow trades.
-- [ ] Statistical analysis of Go/No-Go for Phase 2.
-
-**Total Estimated Engineering Effort:** 2 weeks.
+## Alpha Validation Dashboard KPIs
+- **Dataset Size:** Total ResearchTrades collected.
+- **Wallet Universe:** Count of Observed vs. Active wallets.
+- **Net ROI:** Principal-adjusted return after simulated costs.
+- **Profit Factor:** Gross Profit / Gross Loss.
+- **Concentration:** % of profit contributed by top 10 wallets (limit < 25%).
+- **Signal Frequency:** Trades per day/hour.
 
 ---
 
-## Deferred Until Phase 2
-- Wallet clustering and Sybil detection.
-- Jupiter/Jito execution infrastructure.
-- Solana Signer and Priority Fee logic.
-- Live capital deployment.
+## Phase 2 Go / No-Go Gate
+
+Phase 2 (Jupiter/Jito Execution) may **only** proceed if:
+1. **100+** completed shadow trades.
+2. **Net ROI > 0** (after slippage and fees).
+3. **Profit Factor > 1.2**.
+4. **Win Rate > 55%**.
+5. **No wallet** contributes > 25% of total profits.
+
+---
+
+## Timeline & Milestones
+- **Week 1: Discovery & Ingestion:** Helius/Birdeye integration and `WalletDiscoveryService`.
+- **Week 2: Data Collection:** Deploy `ResearchTrade` and `ShadowPosition` models.
+- **Week 3-5: Observation Phase:** Collect 100+ trades and monitor Dashboard KPIs.
+- **Week 6: Final Audit:** Go/No-Go decision for Phase 2.
