@@ -80,7 +80,18 @@ class SignalAgent(BaseAgent):
 
                 side = data.get("side", "buy")
                 outcome = data.get("outcome", "YES")
-                size = float(data.get("size", data.get("value", 100)) or 100)
+                whale_trade_size = float(data.get("value", data.get("size", 0)) or 0)
+
+                max_position_size = 10.0
+                recommended_position_size = round(max_position_size * signal.confidence, 2)
+                recommended_position_size = max(0.01, min(max_position_size, recommended_position_size))
+
+                logger.info(
+                    "position_size_computed",
+                    whale_trade_size=whale_trade_size,
+                    confidence=signal.confidence,
+                    recommended_position_size=recommended_position_size,
+                )
 
                 try:
                     market_uuid = uuid.UUID(signal.market_id) if isinstance(signal.market_id, str) else None
@@ -107,7 +118,9 @@ class SignalAgent(BaseAgent):
                     "market_condition_id": signal.market_condition_id or data.get("condition_id"),
                     "side": side,
                     "outcome": outcome,
-                    "size": size,
+                    "whale_trade_size": whale_trade_size,
+                    "recommended_position_size": recommended_position_size,
+                    "size": recommended_position_size,
                 }
 
                 from app.services.invariant_guard import validate_signal_fields, dead_letter_signals
@@ -135,6 +148,8 @@ class SignalAgent(BaseAgent):
                     "signal_id": str(created.id),
                     "signal": signal.signal,
                     "confidence": signal.confidence,
+                    "whale_trade_size": whale_trade_size,
+                    "recommended_position_size": recommended_position_size,
                 }, correlation_id=correlation_id)
 
                 await db.commit()

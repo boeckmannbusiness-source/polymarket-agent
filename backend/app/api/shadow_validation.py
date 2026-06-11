@@ -8,6 +8,7 @@ from pydantic import BaseModel
 from app.database import get_db
 from app.core.logging import logger
 from app.services.validation.shadow_validation_service import shadow_validation_service
+from app.services.validation.shadow_runtime_monitor import shadow_runtime_monitor
 from app.services.safety.execution_safety_gate import execution_safety_gate
 
 router = APIRouter()
@@ -141,3 +142,34 @@ async def failure_test5_simulate_valkey_outage(db: AsyncSession = Depends(get_db
     shadow_validation_service.set_injection_state("simulate_valkey_outage", True)
     logger.warning("failure_test_5_valkey_outage_activated")
     return {"test": "simulate_valkey_outage", "status": "activated", "expected": "Fail-closed behavior - No trade approval"}
+
+
+# ── Validation Monitor endpoints ─────────────────────────
+
+
+@router.get("/monitor/status")
+async def get_validation_monitor_status():
+    return await shadow_runtime_monitor.get_validation_status()
+
+
+@router.get("/monitor/latest-snapshot")
+async def get_latest_snapshot(db: AsyncSession = Depends(get_db)):
+    snap = await shadow_runtime_monitor.get_latest_snapshot(db)
+    if snap is None:
+        raise HTTPException(status_code=404, detail="No snapshots recorded yet")
+    return snap
+
+
+@router.get("/monitor/snapshots")
+async def get_snapshot_history(
+    limit: int = Query(100, le=500),
+    since: str | None = Query(None),
+    db: AsyncSession = Depends(get_db),
+):
+    since_dt = datetime.fromisoformat(since) if since else None
+    return await shadow_runtime_monitor.get_snapshot_history(db, limit=limit, since=since_dt)
+
+
+@router.get("/monitor/alerts")
+async def get_active_alerts():
+    return {"alerts": shadow_runtime_monitor.get_active_alerts()}

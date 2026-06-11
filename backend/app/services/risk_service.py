@@ -1,3 +1,4 @@
+import uuid
 from uuid import UUID
 from datetime import datetime, timezone, timedelta
 from dataclasses import dataclass
@@ -112,9 +113,14 @@ class RiskService:
         )
         return abs(float(result.scalar() or 0))
 
-    async def _check_cooldown(self, market_id: UUID | None) -> int:
+    async def _check_cooldown(self, market_id: UUID | str | None) -> int:
         if market_id is None:
             return 0
+        if isinstance(market_id, str):
+            try:
+                market_id = uuid.UUID(market_id)
+            except (ValueError, AttributeError):
+                return 0
         cutoff = datetime.now(timezone.utc) - timedelta(seconds=settings.COOLDOWN_MINUTES * 60)
         result = await self.db.execute(
             select(Trade.updated_at)

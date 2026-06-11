@@ -2,6 +2,8 @@ import asyncio
 import uuid
 from typing import Any
 
+from eth_abi import decode as abi_decode
+
 from app.config import settings
 from app.core.logging import logger
 from app.ingesters.base import BaseIngester
@@ -85,12 +87,14 @@ class PolygonRPCListener(BaseIngester):
                             if isinstance(raw_from, bytes) and len(raw_from) == 32:
                                 raw_from = raw_from[-20:]
                         from_addr = self.Web3.to_checksum_address(raw_from) if isinstance(raw_from, bytes) and len(raw_from) == 20 else ""
+                        decoded = self._decode_trade_log(log)
                         await self._process_ctf_trade(
                             block_num=blk,
                             tx_hash=tx_hash_str,
                             exchange=log.get("address", ""),
                             from_addr=from_addr,
                             correlation_id=str(uuid.uuid4()),
+                            decoded=decoded,
                         )
 
                     for blk, txs in per_block.items():
@@ -110,7 +114,95 @@ class PolygonRPCListener(BaseIngester):
 
             await asyncio.sleep(self.poll_interval)
 
-    async def _process_ctf_trade(self, block_num: int, tx_hash: str, exchange: str, from_addr: str, correlation_id: str):
+    @staticmethod
+    def _decode_trade_log(log: dict) -> dict[str, Any]:
+        topics = log.get("topics", [])
+        result: dict[str, Any] = {
+            "size": None,
+            "price": None,
+            "outcome": None,
+            "condition_id": None,
+            "value": None,
+        }
+
+        try:
+            if len(topics) >= 4:
+                t2, t3 = topics[2], topics[3]
+                t2b = t2 if isinstance(t2, bytes) else b""
+                t3b = t3 if isinstance(t3, bytes) else b""
+                t3_int = int.from_bytes(t3b, "big")
+
+                if t3_int <= 2:
+                    result["outcome"] = ("NO", "YES", str(t3_int))[t3_int] if t3_int < 3 else str(t3_int)
+
+            data_raw = log.get("data", "")
+            data_bytes = (
+                bytes.fromhex(data_raw[2:])
+                if isinstance(data_raw, str) and data_raw.startswith("0x")
+                else data_raw if isinstance(data_raw, bytes)
+                else b""
+            )
+            if len(data_bytes) < 32:
+                return result
+
+            decoded = None
+            for types in (
+                ("uint256", "bytes32", "uint256", "uint256"),
+                ("uint256", "uint256", "uint256", "uint256"),
+                ("uint256", "uint256", "uint256"),
+                ("uint256", "uint256", "bytes32"),
+                ("uint256", "uint256"),
+            ):
+                try:
+                    candidate = abi_decode(types, data_bytes[:sum(32 for _ in types)])
+                    c0 = int(candidate[0])
+                    if c0 in (0, 1):
+                        if result["outcome"] is None:
+                            result["outcome"] = ("NO", "YES")[c0]
+                        if isinstance(candidate[1], bytes) and len(candidate[1]) == 32:
+                            if result["condition_id"] is None and any(b != 0 for b in candidate[1]):
+                                result["condition_id"] = "0x" + candidate[1].hex()
+                            result["size"] = int(candidate[2]) if len(candidate) >= 3 else None
+                            result["value"] = int(candidate[3]) if len(candidate) >= 4 else None
+                        else:
+                            result["size"] = int(candidate[1])
+                            result["value"] = int(candidate[2]) if len(candidate) >= 3 else None
+                    elif result["size"] is None:
+                        result["size"] = c0
+                        result["value"] = int(candidate[1])
+                    decoded = candidate
+                    break
+                except Exception:
+                    continue
+
+            if decoded is not None and len(decoded) >= 3 and result["condition_id"] is None:
+                cid = decoded[-1]
+                if isinstance(cid, bytes) and len(cid) == 32 and any(b != 0 for b in cid):
+                    result["condition_id"] = "0x" + cid.hex()
+                elif isinstance(cid, int):
+                    h = format(cid, "064x")
+                    if h != "0" * 64:
+                        result["condition_id"] = "0x" + h
+
+            sz, val = result.get("size"), result.get("value")
+            if sz is not None and val is not None and sz > 0:
+                result["price"] = round(val / sz, 12)
+
+        except Exception:
+            logger.warning("trade_decoding_failed", tx=log.get("transactionHash", ""))
+
+        return result
+
+    async def _process_ctf_trade(
+        self,
+        block_num: int,
+        tx_hash: str,
+        exchange: str,
+        from_addr: str,
+        correlation_id: str,
+        decoded: dict[str, Any] | None = None,
+    ):
+        d = decoded or {}
         logger.info("publishing_onchain_trade", block=block_num, tx=tx_hash[:12], exchange=exchange[:20], from_addr=from_addr[:12])
         await EventBus.publish(
             "market:data",
@@ -121,6 +213,11 @@ class PolygonRPCListener(BaseIngester):
                 "transaction_hash": tx_hash,
                 "from": from_addr,
                 "to": exchange,
+                "size": d.get("size"),
+                "price": d.get("price"),
+                "outcome": d.get("outcome"),
+                "condition_id": d.get("condition_id"),
+                "value": d.get("value"),
             },
             correlation_id=correlation_id,
         )

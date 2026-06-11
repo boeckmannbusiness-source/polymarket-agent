@@ -20,6 +20,7 @@ from .benchmark_price import BenchmarkPrice
 from .exchange_order import ExchangeOrder
 from .fill import Fill
 from .shadow_decision_log import ShadowDecisionLog
+from .shadow_validation_snapshot import ShadowValidationSnapshot
 
 __all__ = [
     "Market",
@@ -53,4 +54,5 @@ __all__ = [
     "ExchangeOrder",
     "Fill",
     "ShadowDecisionLog",
+    "ShadowValidationSnapshot",
 ]

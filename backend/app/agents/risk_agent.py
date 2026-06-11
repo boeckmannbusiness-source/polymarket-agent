@@ -55,7 +55,7 @@ class RiskAgent(BaseAgent):
             confidence = 0.0
         side = data.get("side", "buy")
         outcome = data.get("outcome")
-        size = data.get("size")
+        size = data.get("recommended_position_size", data.get("size"))
         if size is None:
             size = 0.0
         size = float(size)

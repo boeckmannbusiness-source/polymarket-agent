@@ -18,6 +18,14 @@ from app.services.global_risk_guard import GlobalRiskGuard
 from app.services.pipeline_metrics import inc_execution_failure, inc_trading_halt
 
 
+def normalize_market_identifier(market_id: str) -> str:
+    if not market_id:
+        raise ValueError("missing_market_id")
+    if market_id.startswith("0x"):
+        return market_id
+    return str(UUID(market_id))
+
+
 class ExecutionAgent(BaseAgent):
     name = "execution_agent"
 
@@ -41,10 +49,12 @@ class ExecutionAgent(BaseAgent):
                     correlation_id = msg.get("correlation_id")
 
                     if event_type == "trade.risk_approved":
+                        signal_id = data.get("signal_id", "?")
+                        await self.log_event("exec_received", {"signal_id": signal_id, "market_id": str(data.get("market_id", ""))}, correlation_id=correlation_id)
                         errors = validate_signal_fields(data)
                         if errors:
                             dead_letter_signals.append({"data": data, "errors": errors, "stage": "execution_agent_reject"})
-                            logger.warning("exec_skip_invalid_signal", errors=errors, signal_id=data.get("signal_id"))
+                            logger.warning("exec_skip_invalid_signal", errors=errors, signal_id=signal_id)
                         else:
                             await self.execute_trade(data, correlation_id)
 
@@ -92,6 +102,7 @@ class ExecutionAgent(BaseAgent):
         try:
             from app.database import async_session_factory
             from app.models.shadow_decision_log import ShadowDecisionLog
+            _safe_float = lambda v, default=0.0: float(v) if v is not None else default
             async with async_session_factory() as db:
                 log_entry = ShadowDecisionLog(
                     id=uuid.uuid4(),
@@ -99,12 +110,12 @@ class ExecutionAgent(BaseAgent):
                     strategy_id=data.get("strategy", ""),
                     signal_source=data.get("signal_source", ""),
                     regime=data.get("regime", ""),
-                    regime_confidence=float(data.get("confidence", 0.0)),
-                    expected_return=float(data.get("expected_return", 0.0)),
-                    optimization_weight=float(data.get("optimization_weight", 0.0)),
-                    stability_score=float(data.get("stability_score", 50.0)),
-                    drift_score=float(data.get("drift_score", 0.0)),
-                    exposure_level=float(data.get("exposure_level", 0.0)),
+                    regime_confidence=_safe_float(data.get("confidence"), 0.0),
+                    expected_return=_safe_float(data.get("expected_return"), 0.0),
+                    optimization_weight=_safe_float(data.get("optimization_weight"), 0.0),
+                    stability_score=_safe_float(data.get("stability_score"), 50.0),
+                    drift_score=_safe_float(data.get("drift_score"), 0.0),
+                    exposure_level=_safe_float(data.get("exposure_level"), 0.0),
                     safety_gate_decision=decision,
                     approval_reason="; ".join(reasons) if decision == "SHADOW_APPROVED" else "",
                     rejection_reason="; ".join(reasons) if decision == "SHADOW_BLOCKED" else "",
@@ -113,7 +124,7 @@ class ExecutionAgent(BaseAgent):
                 db.add(log_entry)
                 await db.commit()
         except Exception as e:
-            logger.warning("shadow_decision_log_failed", error=str(e))
+            logger.error("shadow_decision_log_failed", error=str(e), exc_info=True)
 
     async def execute_trade(self, data: dict, correlation_id: str | None = None):
         from app.core.system_mode import get_mode_manager
@@ -155,10 +166,12 @@ class ExecutionAgent(BaseAgent):
             return
 
         try:
-            market_uuid = UUID(market_id) if isinstance(market_id, str) else market_id
-        except (ValueError, AttributeError):
-            logger.warning("exec_skip_invalid_market_id", signal_id=signal_id)
+            market_identifier = normalize_market_identifier(str(market_id))
+        except ValueError:
+            logger.warning("exec_market_id_invalid", signal_id=signal_id, market_id=str(market_id))
+            await self.log_event("exec_market_id_invalid", {"signal_id": signal_id, "market_id": str(market_id)}, correlation_id=correlation_id)
             return
+        await self.log_event("exec_market_id_normalized", {"signal_id": signal_id, "market_id": market_identifier}, correlation_id=correlation_id)
 
         from app.services.safety.execution_safety_gate import (
             execution_safety_gate, ExecutionContext,
@@ -177,7 +190,7 @@ class ExecutionAgent(BaseAgent):
             stability_score=float(stability_score),
             control_state="pre_trade",
             risk_flags=list(risk_flags) if risk_flags else [],
-            market_id=str(market_id),
+            market_id=market_identifier,
             strategy_id=strategy,
             signal_source=data.get("signal_source", ""),
             regime=regime,
@@ -185,11 +198,17 @@ class ExecutionAgent(BaseAgent):
             optimization_weight=float(data.get("optimization_weight", 0.0)),
             signal_id=str(signal_id),
         )
+        await self.log_event("exec_safety_gate_called", {"signal_id": signal_id, "market_id": market_identifier}, correlation_id=correlation_id)
         gate_decision = execution_safety_gate.validate(gate_ctx)
 
         if is_shadow:
             shadow_dec = gate_decision.shadow_decision
             await self._log_shadow_decision(data, shadow_dec, gate_decision.reason, correlation_id)
+            await self.log_event(
+                f"exec_shadow_{shadow_dec.lower().replace('shadow_', '')}",
+                {"signal_id": signal_id, "market_id": market_identifier, "decision": shadow_dec, "reasons": gate_decision.reason},
+                correlation_id=correlation_id,
+            )
             logger.info(
                 "exec_shadow_decision",
                 signal_id=signal_id,
@@ -201,7 +220,7 @@ class ExecutionAgent(BaseAgent):
                     "trade:execution",
                     "trade.shadow_blocked",
                     self.name,
-                    {"signal_id": signal_id, "market_id": market_id, "strategy": strategy,
+                    {"signal_id": signal_id, "market_id": market_identifier, "strategy": strategy,
                      "shadow_decision": shadow_dec, "reasons": gate_decision.reason},
                     correlation_id=correlation_id,
                 )
@@ -210,7 +229,7 @@ class ExecutionAgent(BaseAgent):
                     "trade:execution",
                     "trade.shadow_approved",
                     self.name,
-                    {"signal_id": signal_id, "market_id": market_id, "strategy": strategy,
+                    {"signal_id": signal_id, "market_id": market_identifier, "strategy": strategy,
                      "shadow_decision": shadow_dec},
                     correlation_id=correlation_id,
                 )
@@ -254,6 +273,13 @@ class ExecutionAgent(BaseAgent):
                 correlation_id=correlation_id,
             )
             await self.log_event("trade_failed", {"signal_id": signal_id, "error": "micro_live_restrictions"}, correlation_id=correlation_id)
+            return
+
+        try:
+            market_uuid = UUID(market_identifier)
+        except (ValueError, AttributeError):
+            logger.warning("exec_skip_live_not_uuid_market", signal_id=signal_id, market_id=market_identifier)
+            await inc_execution_failure()
             return
 
         async with async_session_factory() as db:

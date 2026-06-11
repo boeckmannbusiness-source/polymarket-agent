@@ -335,14 +335,19 @@ async def lifespan(app: FastAPI):
     await _scheduler.register_job("portfolio_control", 86400, _control_cycle)  # 24h
 
     # ── Shadow validation monitor ────────────────────────
-    from app.services.validation.shadow_validation_service import shadow_validation_service as _shadow_val_svc
+    from app.services.validation.shadow_runtime_monitor import shadow_runtime_monitor as _shadow_monitor
 
     async def _shadow_validation_cycle():
         try:
-            from app.database import async_session_factory
-            async with async_session_factory() as _svdb:
-                metrics = await _shadow_val_svc.get_execution_metrics(_svdb)
-                logger.info("shadow_validation_metrics", **metrics)
+            result = await _shadow_monitor.collect_and_persist()
+            status = await _shadow_monitor.get_validation_status()
+            logger.info(
+                "shadow_validation_cycle",
+                status=status["status"],
+                progress_pct=status["progress_pct"],
+                snapshots=status["snapshot_count"],
+                alerts=status["active_alert_count"],
+            )
         except Exception:
             logger.warning("shadow_validation_cycle_error", exc_info=True)
 

@@ -14,7 +14,7 @@ class ShadowDecisionLog(Base):
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     timestamp: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), index=True)
-    market_id: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
+    market_id: Mapped[str | None] = mapped_column(String(128), nullable=True, index=True)
     strategy_id: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
     signal_source: Mapped[str | None] = mapped_column(String(64), nullable=True)
     regime: Mapped[str | None] = mapped_column(String(32), nullable=True)
