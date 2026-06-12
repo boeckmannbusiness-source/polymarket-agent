@@ -1,6 +1,7 @@
 from fastapi import APIRouter
 
 from app.api import health, markets, wallets, signals, trades, agents, strategies, execution, backtesting, analytics, attribution, trace, system, cockpit
+from app.api import webhooks as webhooks_router
 from app.api import events as events_router
 from app.api import control as control_router
 from app.api import incidents as incidents_router
@@ -61,3 +62,4 @@ router.include_router(research_pipeline_router.router, tags=["research_pipeline"
 router.include_router(intelligence_router.router, tags=["intelligence"])
 router.include_router(optimization_router.router, prefix="/optimization", tags=["optimization"])
 router.include_router(shadow_validation_router.router, prefix="/shadow-validation", tags=["shadow_validation"])
+router.include_router(webhooks_router.router, prefix="/webhooks", tags=["webhooks"])

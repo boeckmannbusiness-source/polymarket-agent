@@ -128,6 +128,19 @@ class ShadowPositionClosedPayload(BaseModel):
     strategy: str | None = Field(None, max_length=64)
 
 
+class SolanaTradeDetectedPayload(BaseModel):
+    wallet_address: str = Field(..., min_length=32, max_length=44)
+    mint_address: str = Field(..., min_length=32, max_length=44)
+    token_symbol: str | None = Field(None, min_length=2, max_length=10)
+    side: str = Field(..., pattern=r"^(buy|sell)$")
+    size_usd: float = Field(..., gt=0)
+    price_usd: float | None = Field(None, ge=0)
+    tx_signature: str = Field(..., min_length=64, max_length=128)
+    slot: int | None = Field(None, gt=0)
+    source_dex: str | None = Field(None, max_length=32)
+    block_time: str = Field(..., min_length=20, max_length=30)
+
+
 # Event type → payload model mapping
 EVENT_PAYLOAD_MAP: dict[str, type[BaseModel]] = {
     "market:data": MarketDataPayload,
@@ -136,4 +149,5 @@ EVENT_PAYLOAD_MAP: dict[str, type[BaseModel]] = {
     "trade:request": TradeRequestPayload,
     "shadow:position.opened": ShadowPositionOpenedPayload,
     "shadow:position.closed": ShadowPositionClosedPayload,
+    "solana:trade:detected": SolanaTradeDetectedPayload,
 }

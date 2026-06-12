@@ -9,6 +9,7 @@ from app.schemas.events import (
     TradeRequestPayload,
     ShadowPositionOpenedPayload,
     ShadowPositionClosedPayload,
+    SolanaTradeDetectedPayload,
     EVENT_PAYLOAD_MAP,
 )
 
@@ -581,6 +582,7 @@ class TestEventPayloadMap:
             "trade:request",
             "shadow:position.opened",
             "shadow:position.closed",
+            "solana:trade:detected",
         }
         assert set(EVENT_PAYLOAD_MAP.keys()) == expected
 
@@ -605,3 +607,6 @@ class TestEventPayloadMap:
 
     def test_shadow_position_closed_mapped_correctly(self):
         assert EVENT_PAYLOAD_MAP["shadow:position.closed"] == ShadowPositionClosedPayload
+
+    def test_solana_trade_detected_mapped_correctly(self):
+        assert EVENT_PAYLOAD_MAP["solana:trade:detected"] == SolanaTradeDetectedPayload

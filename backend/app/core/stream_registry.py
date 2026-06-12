@@ -115,6 +115,15 @@ StreamRegistry.register(StreamConfig(
     phase="1",
 ))
 
+StreamRegistry.register(StreamConfig(
+    name="solana:trade:detected",
+    maxlen=100_000,
+    trim_mode="approximate",
+    consumer_groups=("smart_wallet_agent", "research_trade_worker", "monitoring"),
+    description="Raw Solana trades detected via Helius webhook",
+    phase="1",
+))
+
 # Phase 2 — deferred
 StreamRegistry.register(StreamConfig(
     name="trade:execution",
