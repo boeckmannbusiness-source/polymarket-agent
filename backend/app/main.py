@@ -194,6 +194,12 @@ async def lifespan(app: FastAPI):
         except Exception as e:
             logger.warning("redis_config_validation_failed", error=str(e))
 
+        from app.core.stream_registry import StreamRegistry
+        for config in StreamRegistry.active_in_phase1():
+            if not config.consumer_groups:
+                logger.error("stream_registry_no_consumer_groups", stream=config.name)
+            logger.info("stream_registry_active", stream=config.name, groups=list(config.consumer_groups))
+
         from app.services.reconciliation_service import check_redis_persistence, run_startup_reconciliation
         await check_redis_persistence(r)
         async with async_session_factory() as rec_db:
@@ -439,6 +445,7 @@ async def _periodic_db_cleanup():
 
 
 async def _periodic_redis_cleanup():
+    from app.core.stream_registry import StreamRegistry
     from app.redis import get_redis
     from app.core.metrics import stream_trim_count, stream_length
     from app.services.redis_monitor import RedisMonitor
@@ -457,7 +464,7 @@ async def _periodic_redis_cleanup():
             r = await get_redis()
             maxlen = settings.REDIS_STREAM_MAXLEN
 
-            _STREAMS_TO_CHECK = ["market:data", "wallet:trade", "signal:generated", "trade:request", "agent:event"]
+            _STREAMS_TO_CHECK = StreamRegistry.phase1_stream_names()
             for s in _STREAMS_TO_CHECK:
                 try:
                     info = await r.xinfo_stream(s)

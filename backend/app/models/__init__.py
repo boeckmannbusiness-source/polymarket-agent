@@ -21,6 +21,9 @@ from .exchange_order import ExchangeOrder
 from .fill import Fill
 from .shadow_decision_log import ShadowDecisionLog
 from .shadow_validation_snapshot import ShadowValidationSnapshot
+from .smart_wallet import SmartWallet
+from .wallet_trade import SolanaWalletTrade
+from .research_trade import ResearchTrade
 
 __all__ = [
     "Market",
@@ -55,4 +58,7 @@ __all__ = [
     "Fill",
     "ShadowDecisionLog",
     "ShadowValidationSnapshot",
+    "SmartWallet",
+    "SolanaWalletTrade",
+    "ResearchTrade",
 ]
