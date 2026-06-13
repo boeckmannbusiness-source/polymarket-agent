@@ -50,6 +50,7 @@ class SmartWalletRepository:
         win_rate: float | None = None,
         pnl_usd: float | None = None,
         score: float | None = None,
+        last_seen_at: datetime | None = None,
     ) -> SmartWallet | None:
         values: dict = {}
         if total_trades is not None:
@@ -60,6 +61,8 @@ class SmartWalletRepository:
             values["pnl_usd"] = pnl_usd
         if score is not None:
             values["score"] = score
+        if last_seen_at is not None:
+            values["last_seen_at"] = last_seen_at
 
         if not values:
             return await self.get_by_id(wallet_id)

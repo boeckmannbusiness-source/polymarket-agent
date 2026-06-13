@@ -388,6 +388,10 @@ async def lifespan(app: FastAPI):
     # ── Non-blocking startup recovery scan ────────────
     bg_tasks.append(asyncio.create_task(_startup_recovery_scan(), name="startup_recovery_scan"))
 
+    # ── Solana SmartWallet Agent ──────────────────────
+    bg_tasks.append(asyncio.create_task(_smart_wallet_agent_loop(), name="smart_wallet_agent"))
+    logger.info("smart_wallet_agent_started")
+
     # ── DLQ callback registration ─────────────────────
     from app.services.reliability.dead_letter_queue import dlq as _dlq
     _dlq.register_callback("reconciliation", lambda _et, _pl: logger.info("dlq_replay_reconciliation", event_type=_et))
@@ -1060,6 +1064,43 @@ async def _ws_redis_bridge():
             break
         except Exception as e:
             logger.warning("ws_redis_bridge_error", error=str(e))
+            await asyncio.sleep(10)
+
+
+async def _smart_wallet_agent_loop():
+    import asyncio
+    from app.database import async_session_factory
+    from app.core.events import EventBus
+    from app.services.smart_wallet_agent import SmartWalletAgent
+
+    await asyncio.sleep(10)
+    while True:
+        try:
+            r = await EventBus.subscribe_to_stream(
+                "solana:trade:detected", "smart_wallet_agent", "smart_wallet_agent_1",
+            )
+            while True:
+                messages = await EventBus.read_stream(
+                    r, "solana:trade:detected", "smart_wallet_agent", "smart_wallet_agent_1",
+                    count=10, block=5000,
+                )
+                if not messages:
+                    await asyncio.sleep(1)
+                    continue
+
+                async with async_session_factory() as db:
+                    agent = SmartWalletAgent(db)
+                    for msg in messages:
+                        try:
+                            data = msg.get("data", {})
+                            await agent.handle_trade_event(data)
+                            await EventBus.ack_message(r, "solana:trade:detected", "smart_wallet_agent", msg["id"])
+                        except Exception:
+                            logger.warning("smart_wallet_agent_event_error", event_id=msg.get("id"))
+        except asyncio.CancelledError:
+            break
+        except Exception:
+            logger.warning("smart_wallet_agent_loop_error", exc_info=True)
             await asyncio.sleep(10)
 
 
