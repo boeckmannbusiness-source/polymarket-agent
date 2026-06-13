@@ -1,8 +1,10 @@
+import time
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.config import settings
 from app.repositories.research_trade_repository import ResearchTradeRepository
 from app.repositories.smart_wallet_repository import SmartWalletRepository
 from app.repositories.wallet_trade_repository import WalletTradeRepository
@@ -21,16 +23,17 @@ def _make_signal_id() -> str:
 
 
 class SignalSeedService:
-    HIGH_SCORE_THRESHOLD: float = 0.7
     VELOCITY_MIN_TRADES: int = 3
     VELOCITY_MIN_WALLETS: int = 2
     VELOCITY_WINDOW_MINUTES: int = 5
+    COOLDOWN_SECONDS: int = 300
 
     def __init__(self, db: AsyncSession):
         self.db = db
         self.wallet_repo = SmartWalletRepository(db)
         self.trade_repo = WalletTradeRepository(db)
         self.research_repo = ResearchTradeRepository(db)
+        self._cooldowns: dict[str, float] = {}
 
     async def evaluate_trade_event(self, event_data: dict) -> int:
         wallet_address = event_data.get("wallet_address")
@@ -56,34 +59,47 @@ class SignalSeedService:
             return 0
 
         count = 0
+        threshold = settings.SOLANA_HIGH_SCORE_THRESHOLD
 
-        if float(wallet.score) >= self.HIGH_SCORE_THRESHOLD:
-            confidence = min(float(wallet.score), 0.95)
-            await self._seed_signal(
-                strategy="high_score_entry",
-                confidence=round(confidence, 6),
-                entry_price=price_usd,
-                wallet_trade_id=wallet_trade_id,
-                signal_id=_make_signal_id(),
-            )
-            count += 1
-
-        recent = await self.trade_repo.list_for_mint(
-            mint_address, limit=self.VELOCITY_MIN_TRADES,
-        )
-        if len(recent) >= self.VELOCITY_MIN_TRADES:
-            unique_wallets = set(t.wallet_id for t in recent)
-            if len(unique_wallets) >= self.VELOCITY_MIN_WALLETS:
+        if float(wallet.score) >= threshold:
+            if not self._in_cooldown("high_score_entry", wallet_address):
+                confidence = min(float(wallet.score), 0.95)
                 await self._seed_signal(
-                    strategy="token_velocity_spike",
-                    confidence=0.6,
+                    strategy="high_score_entry",
+                    confidence=round(confidence, 6),
                     entry_price=price_usd,
                     wallet_trade_id=wallet_trade_id,
                     signal_id=_make_signal_id(),
                 )
                 count += 1
 
+        cutoff = datetime.now(timezone.utc) - timedelta(minutes=self.VELOCITY_WINDOW_MINUTES)
+        recent = await self.trade_repo.list_for_mint_since(
+            mint_address, since=cutoff, limit=self.VELOCITY_MIN_TRADES,
+        )
+        if len(recent) >= self.VELOCITY_MIN_TRADES:
+            unique_wallets = set(t.wallet_id for t in recent)
+            if len(unique_wallets) >= self.VELOCITY_MIN_WALLETS:
+                if not self._in_cooldown("token_velocity_spike", mint_address):
+                    await self._seed_signal(
+                        strategy="token_velocity_spike",
+                        confidence=0.6,
+                        entry_price=price_usd,
+                        wallet_trade_id=wallet_trade_id,
+                        signal_id=_make_signal_id(),
+                    )
+                    count += 1
+
         return count
+
+    def _in_cooldown(self, strategy: str, key: str) -> bool:
+        cache_key = f"{strategy}:{key}"
+        now = time.monotonic()
+        last = self._cooldowns.get(cache_key)
+        if last is not None and now - last < self.COOLDOWN_SECONDS:
+            return True
+        self._cooldowns[cache_key] = now
+        return False
 
     async def _seed_signal(
         self,

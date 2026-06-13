@@ -149,12 +149,13 @@ class Settings(BaseSettings):
     # ── Event schema enforcement ──────────────────────────────
     EVENT_SCHEMA_ENFORCEMENT: Literal["strict", "log", "off"] = "strict"
 
-    # ── Solana (TODO: Sprint 2) ──────────────────────────────
+    # ── Solana ──────────────────────────────────────────────
     HELIUS_API_KEY: str = ""
     HELIUS_WEBHOOK_SECRET: str = ""
     BIRDEYE_API_KEY: str = ""
     SOLANA_RPC_URL: str = ""
     SOLANA_CHAIN_ID: int = 0
+    SOLANA_HIGH_SCORE_THRESHOLD: float = 0.7
 
     # ── Stream trimming ───────────────────────────────────────
     STREAM_TRIM_APPROX: bool = True

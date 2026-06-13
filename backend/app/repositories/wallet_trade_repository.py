@@ -81,3 +81,18 @@ class WalletTradeRepository:
             .limit(limit),
         )
         return result.scalars().all()
+
+    async def list_for_mint_since(
+        self,
+        mint_address: str,
+        since: datetime,
+        limit: int = 100,
+    ) -> Sequence[WalletTrade]:
+        result = await self.db.execute(
+            select(WalletTrade)
+            .where(WalletTrade.mint_address == mint_address)
+            .where(WalletTrade.block_time >= since)
+            .order_by(WalletTrade.block_time.desc())
+            .limit(limit),
+        )
+        return result.scalars().all()

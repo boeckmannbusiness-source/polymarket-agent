@@ -1,7 +1,6 @@
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
-from unittest.mock import AsyncMock, patch
 
 import pytest
 
@@ -217,3 +216,58 @@ class TestSignalSeedService:
         research = await ResearchTradeRepository(db_session).list_open_positions()
         assert len(research) == 1
         assert research[0].wallet_trade_id == trade_id
+
+    async def test_cooldown_prevents_duplicate_high_score(self, db_session):
+        wallet_repo = SmartWalletRepository(db_session)
+        wallet = await wallet_repo.create_wallet(
+            wallet_address=_make_wallet(),
+            source="test",
+            first_seen_at=datetime.now(timezone.utc),
+        )
+        await wallet_repo.update_metrics(wallet.id, score=0.85)
+
+        service = SignalSeedService(db_session)
+        count1 = await service.evaluate_trade_event(_event_data(trade_id=str(uuid.uuid4())))
+        count2 = await service.evaluate_trade_event(_event_data(trade_id=str(uuid.uuid4())))
+        assert count1 == 1
+        assert count2 == 0
+
+        research = await ResearchTradeRepository(db_session).list_open_positions()
+        assert len(research) == 1
+
+    async def test_velocity_time_window_excludes_old_trades(self, db_session):
+        trade_repo = WalletTradeRepository(db_session)
+        wallet_repo = SmartWalletRepository(db_session)
+
+        wallets = []
+        for i in range(3):
+            addr = f"old_{i}_111111111111111111111111111111111"
+            w = await wallet_repo.create_wallet(
+                wallet_address=addr,
+                source="test",
+                first_seen_at=datetime.now(timezone.utc),
+            )
+            wallets.append(w)
+
+        mint = _make_mint()
+        old_time = datetime.now(timezone.utc) - timedelta(minutes=30)
+        for i, w in enumerate(wallets):
+            await trade_repo.create_trade(
+                wallet_id=w.id,
+                tx_signature=f"old_sig_{w.id}_{i}",
+                mint_address=mint,
+                side="buy",
+                size_usd=100.0,
+                price_usd=150.0,
+                block_time=old_time,
+            )
+
+        event_wallet = await wallet_repo.create_wallet(
+            wallet_address=_make_wallet(),
+            source="test",
+            first_seen_at=datetime.now(timezone.utc),
+        )
+
+        service = SignalSeedService(db_session)
+        count = await service.evaluate_trade_event(_event_data(wallet=_make_wallet()))
+        assert count == 0
