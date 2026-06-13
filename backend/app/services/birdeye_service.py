@@ -76,7 +76,7 @@ class BirdeyeEnrichmentService:
             return True
 
         price = await self._get_price(trade.mint_address)
-        if price is None:
+        if price is None or price <= 0:
             return False
 
         trade.price_usd = round(price, 8)

@@ -254,6 +254,33 @@ class TestBirdeyeEnrichmentService:
         updated = await repo.get_by_id(trade.id)
         assert updated.price_usd == Decimal("0.0")
 
+    async def test_enrich_trade_returns_false_when_price_zero(self, db_session):
+        repo = WalletTradeRepository(db_session)
+        wallet_repo = SmartWalletRepository(db_session)
+        wallet = await wallet_repo.create_wallet(
+            wallet_address=_make_wallet_address(),
+            source="test",
+            first_seen_at=datetime.now(timezone.utc),
+        )
+        trade = await repo.create_trade(
+            wallet_id=wallet.id,
+            tx_signature=_make_tx_sig(41),
+            mint_address=_make_mint(),
+            side="buy",
+            size_usd=10.0,
+            price_usd=0.0,
+            block_time=datetime.now(timezone.utc),
+        )
+
+        service = BirdeyeEnrichmentService(db_session)
+        with patch.object(service.client, "get_token_price", new=AsyncMock(return_value=0.0)):
+            result = await service.enrich_trade(trade.id, token_amount=10.0)
+        assert result is False
+
+        updated = await repo.get_by_id(trade.id)
+        assert updated.price_usd == Decimal("0.0")
+        assert updated.size_usd == Decimal("10.0")
+
     async def test_enrich_batch_counts_successes(self, db_session):
         repo = WalletTradeRepository(db_session)
         wallet_repo = SmartWalletRepository(db_session)
