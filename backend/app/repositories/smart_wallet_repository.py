@@ -64,12 +64,23 @@ class SmartWalletRepository:
         if last_seen_at is not None:
             values["last_seen_at"] = last_seen_at
 
-        if not values:
+        last_seen = values.pop("last_seen_at", None)
+
+        if not values and last_seen is None:
             return await self.get_by_id(wallet_id)
 
-        await self.db.execute(
-            update(SmartWallet).where(SmartWallet.id == wallet_id).values(**values),
-        )
+        if last_seen is not None:
+            current = await self.get_by_id(wallet_id)
+            if current and current.last_seen_at and current.last_seen_at > last_seen:
+                last_seen = current.last_seen_at
+
+        stmt = update(SmartWallet).where(SmartWallet.id == wallet_id)
+        if values:
+            stmt = stmt.values(**values)
+        if last_seen is not None:
+            stmt = stmt.values(last_seen_at=last_seen)
+
+        await self.db.execute(stmt)
         await self.db.commit()
         return await self.get_by_id(wallet_id)
 

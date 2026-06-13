@@ -1091,12 +1091,23 @@ async def _smart_wallet_agent_loop():
                 async with async_session_factory() as db:
                     agent = SmartWalletAgent(db)
                     for msg in messages:
+                        data = msg.get("data", {})
                         try:
-                            data = msg.get("data", {})
                             await agent.handle_trade_event(data)
-                            await EventBus.ack_message(r, "solana:trade:detected", "smart_wallet_agent", msg["id"])
                         except Exception:
                             logger.warning("smart_wallet_agent_event_error", event_id=msg.get("id"))
+                            try:
+                                import json
+                                from app.redis import get_redis as _get_dlq_redis
+                                dlq_r = await _get_dlq_redis()
+                                await dlq_r.xadd(
+                                    "solana:dlq:events",
+                                    {"stream": "solana:trade:detected", "msg_id": msg["id"], "source": "smart_wallet_agent", "data": json.dumps(data)},
+                                    maxlen=10000,
+                                )
+                            except Exception:
+                                pass
+                        await EventBus.ack_message(r, "solana:trade:detected", "smart_wallet_agent", msg["id"])
         except asyncio.CancelledError:
             break
         except Exception:
