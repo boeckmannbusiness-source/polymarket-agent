@@ -16,6 +16,7 @@ from app.api import tournament as tournament_router
 from app.api.research import router as research_router
 from app.api.research_agents import router as research_agents_router
 from app.api import evolution as evolution_router
+from app.api import solana_signals as solana_signals_router
 from app.api import governance as governance_router
 from app.api import research_memory as research_memory_router
 from app.api import research_pipeline as research_pipeline_router
@@ -63,3 +64,4 @@ router.include_router(intelligence_router.router, tags=["intelligence"])
 router.include_router(optimization_router.router, prefix="/optimization", tags=["optimization"])
 router.include_router(shadow_validation_router.router, prefix="/shadow-validation", tags=["shadow_validation"])
 router.include_router(webhooks_router.router, prefix="/webhooks", tags=["webhooks"])
+router.include_router(solana_signals_router.router, prefix="/signals/solana", tags=["solana_signals"])

@@ -392,6 +392,10 @@ async def lifespan(app: FastAPI):
     bg_tasks.append(asyncio.create_task(_smart_wallet_agent_loop(), name="smart_wallet_agent"))
     logger.info("smart_wallet_agent_started")
 
+    # ── Solana Signal Seed Worker ─────────────────────
+    bg_tasks.append(asyncio.create_task(_signal_seed_worker_loop(), name="signal_seed_worker"))
+    logger.info("signal_seed_worker_started")
+
     # ── DLQ callback registration ─────────────────────
     from app.services.reliability.dead_letter_queue import dlq as _dlq
     _dlq.register_callback("reconciliation", lambda _et, _pl: logger.info("dlq_replay_reconciliation", event_type=_et))
@@ -1112,6 +1116,54 @@ async def _smart_wallet_agent_loop():
             break
         except Exception:
             logger.warning("smart_wallet_agent_loop_error", exc_info=True)
+            await asyncio.sleep(10)
+
+
+async def _signal_seed_worker_loop():
+    import asyncio
+    from app.database import async_session_factory
+    from app.core.events import EventBus
+    from app.services.signal_seed_service import SignalSeedService
+
+    await asyncio.sleep(15)
+    while True:
+        try:
+            r = await EventBus.subscribe_to_stream(
+                "solana:trade:detected", "research_trade_worker", "signal_seed_worker_1",
+            )
+            while True:
+                messages = await EventBus.read_stream(
+                    r, "solana:trade:detected", "research_trade_worker", "signal_seed_worker_1",
+                    count=10, block=5000,
+                )
+                if not messages:
+                    await asyncio.sleep(1)
+                    continue
+
+                async with async_session_factory() as db:
+                    service = SignalSeedService(db)
+                    for msg in messages:
+                        data = msg.get("data", {})
+                        try:
+                            await service.evaluate_trade_event(data)
+                        except Exception:
+                            logger.warning("signal_seed_event_error", event_id=msg.get("id"))
+                            try:
+                                import json
+                                from app.redis import get_redis as _get_dlq_redis
+                                dlq_r = await _get_dlq_redis()
+                                await dlq_r.xadd(
+                                    "solana:dlq:events",
+                                    {"stream": "solana:trade:detected", "msg_id": msg["id"], "source": "signal_seed_worker", "data": json.dumps(data)},
+                                    maxlen=10000,
+                                )
+                            except Exception:
+                                pass
+                        await EventBus.ack_message(r, "solana:trade:detected", "research_trade_worker", msg["id"])
+        except asyncio.CancelledError:
+            break
+        except Exception:
+            logger.warning("signal_seed_worker_loop_error", exc_info=True)
             await asyncio.sleep(10)
 
 

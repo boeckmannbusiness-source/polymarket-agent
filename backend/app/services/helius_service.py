@@ -78,6 +78,7 @@ class HeliusService:
             "tx_signature": tx.signature,
             "slot": tx.slot,
             "block_time": block_time.isoformat(),
+            "trade_id": str(trade.id),
         }
 
         try:

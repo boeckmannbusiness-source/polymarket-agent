@@ -139,6 +139,7 @@ class SolanaTradeDetectedPayload(BaseModel):
     slot: int | None = Field(None, gt=0)
     source_dex: str | None = Field(None, max_length=32)
     block_time: str = Field(..., min_length=20, max_length=30)
+    trade_id: str = Field(..., min_length=32, max_length=64)
 
 
 # Event type → payload model mapping
