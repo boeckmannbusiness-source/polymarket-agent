@@ -108,6 +108,7 @@ class PriceTrackingService:
 
         dur = time.monotonic() - t0
         solana_price_source_total.labels(source="unavailable").inc()
+        solana_price_source_total.labels(source="error").inc()
         solana_price_fetch_seconds.observe(dur)
         return PriceResult(price=None, source="unavailable")
 

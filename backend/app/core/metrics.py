@@ -124,3 +124,10 @@ solana_price_update_total = Counter("polymarket_solana_price_update_total", "Fre
 
 # ── Solana Validation API (T3-V3) metrics ────────────────
 solana_validation_requests_total = Counter("polymarket_solana_validation_requests_total", "Validation API requests", ["endpoint"])
+
+# ── Solana Reconciliation (S3.1-T3) metrics ─────────────
+solana_shadow_reconciliation_drift_total = Counter(
+    "polymarket_solana_shadow_reconciliation_drift_total",
+    "PnL drift anomalies detected during reconciliation",
+    ["strategy", "severity"],
+)

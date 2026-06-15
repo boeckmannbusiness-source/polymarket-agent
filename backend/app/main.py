@@ -1343,6 +1343,8 @@ async def _shadow_price_tracker_loop():
             break
         except Exception:
             logger.warning("shadow_price_tracker_error", exc_info=True)
+            await asyncio.sleep(5)
+            continue
         await asyncio.sleep(settings.SOLANA_SHADOW_EVAL_INTERVAL)
 
 
@@ -1363,6 +1365,8 @@ async def _shadow_eval_loop():
             break
         except Exception:
             logger.warning("shadow_eval_loop_error", exc_info=True)
+            await asyncio.sleep(5)
+            continue
         await asyncio.sleep(settings.SOLANA_SHADOW_EVAL_INTERVAL)
 
 

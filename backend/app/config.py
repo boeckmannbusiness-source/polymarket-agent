@@ -165,6 +165,11 @@ class Settings(BaseSettings):
     SOLANA_SHADOW_PRICE_TTL: int = 120
     SOLANA_SHADOW_TIMEOUT_HOURS: int = 72
 
+    # ── SLO thresholds (Sprint 3.1) ───────────────────────────
+    SLO_PRICE_STALE_THRESHOLD_SECONDS: int = 120
+    SLO_EVAL_MAX_LAG_SECONDS: int = 5
+    SLO_PRICE_SUCCESS_RATE_MIN: float = 0.95
+
     # ── Stream trimming ───────────────────────────────────────
     STREAM_TRIM_APPROX: bool = True
     STREAM_TRIM_INTERVAL: int = 600
