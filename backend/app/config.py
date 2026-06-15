@@ -156,6 +156,14 @@ class Settings(BaseSettings):
     SOLANA_RPC_URL: str = ""
     SOLANA_CHAIN_ID: int = 0
     SOLANA_HIGH_SCORE_THRESHOLD: float = 0.7
+    SOLANA_RECENCY_HALF_LIFE_HOURS: float = 24.0
+    SOLANA_FREQUENCY_SATURATION_TRADES: int = 10
+    SOLANA_SHADOW_TP_PCT: float = 0.25
+    SOLANA_SHADOW_SL_PCT: float = 0.15
+    SOLANA_SHADOW_FEE_PCT: float = 0.0075
+    SOLANA_SHADOW_EVAL_INTERVAL: int = 60
+    SOLANA_SHADOW_PRICE_TTL: int = 120
+    SOLANA_SHADOW_TIMEOUT_HOURS: int = 72
 
     # ── Stream trimming ───────────────────────────────────────
     STREAM_TRIM_APPROX: bool = True

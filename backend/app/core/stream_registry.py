@@ -120,7 +120,11 @@ StreamRegistry.register(StreamConfig(
     maxlen=100_000,
     trim_mode="approximate",
     consumer_groups=("smart_wallet_agent", "research_trade_worker", "monitoring"),
-    description="Raw Solana trades detected via Helius webhook",
+    description="Raw Solana trades detected via Helius webhook. "
+                "Consumers MUST use EventBus.subscribe_to_stream() which calls "
+                "xgroup_create(id='0', mkstream=True) — starts from the beginning, "
+                "so all events emitted before consumer registration are replayed. "
+                "DO NOT use xgroup_create(id='$') which would skip pre-existing events.",
     phase="1",
 ))
 

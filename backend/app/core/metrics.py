@@ -100,3 +100,27 @@ audit_v3_fail_closed_score = Gauge("polymarket_audit_v3_fail_closed_score", "Fai
 audit_v3_runtime_score = Gauge("polymarket_audit_v3_runtime_score", "Runtime enforcement score (0-100)")
 audit_v3_operational_score = Gauge("polymarket_audit_v3_operational_score", "Operational readiness score (0-100)")
 audit_v3_gate_score = Gauge("polymarket_audit_v3_gate_score", "Micro-capital readiness gate overall score")
+
+# ── Solana (Sprint 2) metrics ───────────────────────
+solana_webhook_processed_total = Counter("polymarket_solana_webhook_processed_total", "Helius webhook trades processed", ["status"])
+solana_trades_enriched_total = Counter("polymarket_solana_trades_enriched_total", "Birdeye enrichment attempts", ["result"])
+solana_signals_generated_total = Counter("polymarket_solana_signals_generated_total", "Solana signal seeds generated", ["strategy"])
+_ENRICHMENT_BUCKETS_MS = [5, 10, 25, 50, 100, 250, 500, 1000, 2500, 5000, 10000]
+solana_enrichment_latency = Histogram("polymarket_solana_enrichment_latency_ms", "Birdeye enrichment latency (ms)", buckets=_ENRICHMENT_BUCKETS_MS)
+solana_dlq_replayed_total = Counter("polymarket_solana_dlq_replayed_total", "Solana DLQ events replayed", ["source"])
+
+# ── Solana Shadow Portfolio (Sprint 4 / T3-V1) metrics ──
+solana_shadow_positions_total = Gauge("polymarket_solana_shadow_positions_total", "Shadow positions by status", ["status"])
+solana_shadow_pnl_total = Gauge("polymarket_solana_shadow_pnl_total", "Shadow portfolio unrealized PnL by strategy", ["strategy"])
+solana_shadow_evals_total = Counter("polymarket_solana_shadow_evals_total", "Shadow position evaluation cycles", ["result"])
+solana_shadow_price_updates_total = Counter("polymarket_solana_shadow_price_updates_total", "Shadow price cache updates", ["source"])
+
+# ── Solana Price Tracker (T3-V2) metrics ───────────────────
+solana_price_source_total = Counter("polymarket_solana_price_source_total", "Price fetch by source", ["source"])
+solana_price_stale_total = Counter("polymarket_solana_price_stale_total", "Stale price (DB fallback) count")
+_SOLANA_PRICE_BUCKETS = [0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0]
+solana_price_fetch_seconds = Histogram("polymarket_solana_price_fetch_seconds", "Price fetch duration (seconds)", buckets=_SOLANA_PRICE_BUCKETS)
+solana_price_update_total = Counter("polymarket_solana_price_update_total", "Fresh price cache writes")
+
+# ── Solana Validation API (T3-V3) metrics ────────────────
+solana_validation_requests_total = Counter("polymarket_solana_validation_requests_total", "Validation API requests", ["endpoint"])

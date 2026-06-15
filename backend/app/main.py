@@ -257,6 +257,9 @@ async def lifespan(app: FastAPI):
     bg_tasks.append(asyncio.create_task(_periodic_agent_log_cleanup(), name="agent_log_cleanup"))
     logger.info("agent_log_cleanup_started")
 
+    bg_tasks.append(asyncio.create_task(_periodic_hypothesis_cleanup(), name="hypothesis_cleanup"))
+    logger.info("hypothesis_cleanup_started")
+
     bg_tasks.append(asyncio.create_task(_periodic_pool_monitor(), name="pool_monitor"))
     logger.info("pool_monitor_started")
 
@@ -388,6 +391,13 @@ async def lifespan(app: FastAPI):
     # ── Non-blocking startup recovery scan ────────────
     bg_tasks.append(asyncio.create_task(_startup_recovery_scan(), name="startup_recovery_scan"))
 
+    # ── Startup assertion: HELIUS_WEBHOOK_SECRET in production ──
+    if settings.APP_ENV == "production" and not settings.HELIUS_WEBHOOK_SECRET:
+        raise RuntimeError(
+            "HELIUS_WEBHOOK_SECRET must be set when APP_ENV=production. "
+            "Without it, webhook auth is disabled and the service is exposed to unauthenticated requests."
+        )
+
     # ── Solana SmartWallet Agent ──────────────────────
     bg_tasks.append(asyncio.create_task(_smart_wallet_agent_loop(), name="smart_wallet_agent"))
     logger.info("smart_wallet_agent_started")
@@ -395,6 +405,10 @@ async def lifespan(app: FastAPI):
     # ── Solana Signal Seed Worker ─────────────────────
     bg_tasks.append(asyncio.create_task(_signal_seed_worker_loop(), name="signal_seed_worker"))
     logger.info("signal_seed_worker_started")
+
+    # ── Solana DLQ Replay Worker ──────────────────────
+    bg_tasks.append(asyncio.create_task(_solana_dlq_replay_loop(), name="solana_dlq_replay"))
+    logger.info("solana_dlq_replay_started")
 
     # ── DLQ callback registration ─────────────────────
     from app.services.reliability.dead_letter_queue import dlq as _dlq
@@ -404,6 +418,14 @@ async def lifespan(app: FastAPI):
     _dlq.register_callback("ws_publish", lambda _et, _pl: logger.info("dlq_replay_ws_publish", event_type=_et))
     _dlq.register_callback("scheduler", lambda _et, _pl: logger.info("dlq_replay_scheduler", event_type=_et))
     logger.info("dlq_callbacks_registered")
+
+    # ── Shadow price tracker (T3-V2, runs every 60s, +0s stagger) ──
+    bg_tasks.append(asyncio.create_task(_shadow_price_tracker_loop(), name="shadow_price_tracker"))
+    logger.info("shadow_price_tracker_started")
+
+    # ── Shadow evaluation loop (T3-V1, runs every 60s, +15s stagger) ──
+    bg_tasks.append(asyncio.create_task(_shadow_eval_loop(), name="shadow_eval"))
+    logger.info("shadow_eval_started")
 
     yield
 
@@ -632,6 +654,35 @@ async def _periodic_agent_log_cleanup():
         except Exception as e:
             from app.core.logging import logger
             logger.warning("agent_log_cleanup_error", error=str(e))
+        await asyncio.sleep(86400)
+
+
+async def _periodic_hypothesis_cleanup():
+    import asyncio
+    from datetime import datetime, timezone, timedelta
+    from app.database import async_session_factory
+
+    now = datetime.now(timezone.utc)
+    next_run = now.replace(hour=3, minute=0, second=0, microsecond=0)
+    if next_run <= now:
+        next_run += timedelta(days=1)
+    initial_delay = (next_run - now).total_seconds()
+    await asyncio.sleep(initial_delay)
+
+    while True:
+        try:
+            async with async_session_factory() as db:
+                from app.services.research_hypothesis_service import ResearchHypothesisService
+                svc = ResearchHypothesisService(db)
+                deleted = await svc.purge_expired()
+                if deleted:
+                    from app.core.logging import logger
+                    logger.info("hypothesis_cleanup_purged", rows=deleted)
+        except asyncio.CancelledError:
+            break
+        except Exception as e:
+            from app.core.logging import logger
+            logger.warning("hypothesis_cleanup_error", error=str(e))
         await asyncio.sleep(86400)
 
 
@@ -1165,6 +1216,154 @@ async def _signal_seed_worker_loop():
         except Exception:
             logger.warning("signal_seed_worker_loop_error", exc_info=True)
             await asyncio.sleep(10)
+
+
+_DLQ_MAX_RETRIES = 3
+
+
+async def _solana_dlq_replay_loop():
+    import asyncio
+    import json
+
+    from app.core.events import EventBus
+    from app.core.metrics import solana_dlq_replayed_total
+    from app.redis import get_redis
+
+    await asyncio.sleep(30)
+    while True:
+        try:
+            r = await get_redis()
+            entries = await r.xread({"solana:dlq:events": "0"}, count=20, block=5000)
+            if not entries or not entries[0]:
+                await asyncio.sleep(10)
+                continue
+
+            stream_key, messages = entries[0]
+            for msg in messages:
+                msg_id, fields = msg
+                data = {k.decode() if isinstance(k, bytes) else k: v.decode() if isinstance(v, bytes) else v for k, v in fields.items()}
+                source = data.get("source", "unknown")
+                event_data_str = data.get("data")
+
+                # ── Poison pill protection ─────────────────────
+                retry_count = int(data.get("_retry_count", 0))
+                if retry_count >= _DLQ_MAX_RETRIES:
+                    logger.warning("dlq_poison_pill_detected", msg_id=msg_id, source=source, retry_count=retry_count)
+                    await r.xadd(
+                        "solana:dlq:poison",
+                        {"original_msg_id": msg_id, "source": source, "data": event_data_str or ""},
+                        maxlen=1000,
+                    )
+                    await r.xdel("solana:dlq:events", msg_id)
+                    solana_dlq_replayed_total.labels(source=f"poison:{source}").inc()
+                    continue
+
+                success = False
+                if event_data_str:
+                    try:
+                        event_data = json.loads(event_data_str)
+                        await EventBus.publish(
+                            "solana:trade:detected",
+                            "solana:trade:detected",
+                            f"dlq_replay:{source}",
+                            event_data,
+                        )
+                        success = True
+                    except Exception:
+                        logger.warning("dlq_replay_publish_failed", msg_id=msg_id, source=source)
+
+                if success:
+                    solana_dlq_replayed_total.labels(source=source).inc()
+                    await r.xdel("solana:dlq:events", msg_id)
+                else:
+                    # Increment retry counter and leave in DLQ for next cycle
+                    await r.xadd(
+                        "solana:dlq:events",
+                        {"_retry_count": str(retry_count + 1), **data},
+                        maxlen=10000,
+                    )
+                    await r.xdel("solana:dlq:events", msg_id)
+        except asyncio.CancelledError:
+            break
+        except Exception:
+            logger.warning("solana_dlq_replay_loop_error", exc_info=True)
+            await asyncio.sleep(10)
+
+
+async def _shadow_price_tracker_loop():
+    import asyncio
+    from app.database import async_session_factory
+    from app.services.shadow_price_service import PriceTrackingService
+    from app.repositories.shadow_position_repository import ShadowPositionRepository
+    from app.models.research_trade import ResearchTrade
+    from app.models.wallet_trade import SolanaWalletTrade
+    from sqlalchemy import select
+
+    await asyncio.sleep(0)
+    while True:
+        try:
+            async with async_session_factory() as db:
+                price_svc = PriceTrackingService(db)
+                repo = ShadowPositionRepository(db)
+                open_positions = await repo.list_open()
+
+                rt_ids = [p.research_trade_id for p in open_positions if p.research_trade_id is not None]
+                if not rt_ids:
+                    await asyncio.sleep(settings.SOLANA_SHADOW_EVAL_INTERVAL)
+                    continue
+
+                rows = await db.execute(
+                    select(ResearchTrade.id, SolanaWalletTrade.mint_address)
+                    .join(SolanaWalletTrade, ResearchTrade.wallet_trade_id == SolanaWalletTrade.id)
+                    .where(ResearchTrade.id.in_(rt_ids))
+                    .where(SolanaWalletTrade.mint_address.isnot(None)),
+                )
+                rt_to_mint = {row.id: row.mint_address for row in rows.all()}
+
+                distinct_mints = list(set(rt_to_mint.values()))
+                mint_to_price: dict[str, float] = {}
+                for mint in distinct_mints:
+                    result = await price_svc.resolve_price(mint)
+                    if result.price is not None:
+                        mint_to_price[mint] = float(result.price)
+
+                updated = 0
+                for pos in open_positions:
+                    mint = rt_to_mint.get(pos.research_trade_id)
+                    if mint is None:
+                        continue
+                    price = mint_to_price.get(mint)
+                    if price is not None:
+                        await repo.update_current_price(pos.id, price)
+                        updated += 1
+
+                if updated:
+                    logger.info("shadow_price_tracker_updated", count=updated)
+        except asyncio.CancelledError:
+            break
+        except Exception:
+            logger.warning("shadow_price_tracker_error", exc_info=True)
+        await asyncio.sleep(settings.SOLANA_SHADOW_EVAL_INTERVAL)
+
+
+async def _shadow_eval_loop():
+    import asyncio
+    from app.database import async_session_factory
+    from app.services.shadow_portfolio_service import ShadowPortfolioService
+
+    await asyncio.sleep(15)
+    while True:
+        try:
+            async with async_session_factory() as db:
+                svc = ShadowPortfolioService(db)
+                closed = await svc.evaluate_all()
+                if closed:
+                    logger.info("shadow_eval_closed_positions", count=len(closed))
+        except asyncio.CancelledError:
+            break
+        except Exception:
+            logger.warning("shadow_eval_loop_error", exc_info=True)
+        await asyncio.sleep(settings.SOLANA_SHADOW_EVAL_INTERVAL)
 
 
 app = FastAPI(

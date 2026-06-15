@@ -4,8 +4,16 @@ from typing import Sequence
 
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from app.models.research_trade import ResearchTrade
+from app.models.wallet_trade import SolanaWalletTrade
+from app.models.smart_wallet import SmartWallet
+
+
+_WALLET_LOADS = [
+    selectinload(ResearchTrade.wallet_trade).selectinload(SolanaWalletTrade.wallet),
+]
 
 
 class ResearchTradeRepository:
@@ -36,7 +44,9 @@ class ResearchTradeRepository:
 
     async def get_by_id(self, trade_id: uuid.UUID) -> ResearchTrade | None:
         result = await self.db.execute(
-            select(ResearchTrade).where(ResearchTrade.id == trade_id),
+            select(ResearchTrade)
+            .options(*_WALLET_LOADS)
+            .where(ResearchTrade.id == trade_id),
         )
         return result.scalar_one_or_none()
 
@@ -65,12 +75,34 @@ class ResearchTradeRepository:
         self,
         strategy: str | None = None,
         skip: int = 0,
-        limit: int = 100,
+        limit: int | None = 100,
     ) -> Sequence[ResearchTrade]:
-        query = select(ResearchTrade).where(ResearchTrade.status == "open")
+        query = (
+            select(ResearchTrade)
+            .options(*_WALLET_LOADS)
+            .where(ResearchTrade.status == "open")
+        )
         if strategy:
             query = query.where(ResearchTrade.strategy == strategy)
-        query = query.order_by(ResearchTrade.opened_at.desc()).offset(skip).limit(limit)
+        query = query.order_by(ResearchTrade.opened_at.desc()).offset(skip)
+        if limit is not None:
+            query = query.limit(limit)
+        result = await self.db.execute(query)
+        return result.scalars().all()
+
+    async def list_all(
+        self,
+        skip: int = 0,
+        limit: int | None = 100,
+    ) -> Sequence[ResearchTrade]:
+        query = (
+            select(ResearchTrade)
+            .options(*_WALLET_LOADS)
+            .order_by(ResearchTrade.opened_at.desc())
+            .offset(skip)
+        )
+        if limit is not None:
+            query = query.limit(limit)
         result = await self.db.execute(query)
         return result.scalars().all()
 
@@ -78,15 +110,18 @@ class ResearchTradeRepository:
         self,
         strategy: str,
         skip: int = 0,
-        limit: int = 100,
+        limit: int | None = 100,
     ) -> Sequence[ResearchTrade]:
-        result = await self.db.execute(
+        query = (
             select(ResearchTrade)
+            .options(*_WALLET_LOADS)
             .where(ResearchTrade.strategy == strategy)
             .order_by(ResearchTrade.opened_at.desc())
             .offset(skip)
-            .limit(limit),
         )
+        if limit is not None:
+            query = query.limit(limit)
+        result = await self.db.execute(query)
         return result.scalars().all()
 
     async def count_open(self) -> int:

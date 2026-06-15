@@ -1,4 +1,5 @@
 import json
+import time
 import uuid
 from datetime import datetime, timezone
 
@@ -7,6 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
 from app.core.events import EventBus
+from app.core.metrics import solana_enrichment_latency, solana_trades_enriched_total, solana_webhook_processed_total
 from app.redis import get_redis
 from app.repositories.smart_wallet_repository import SmartWalletRepository
 from app.repositories.wallet_trade_repository import WalletTradeRepository
@@ -61,13 +63,19 @@ class HeliusService:
         )
 
         if trade.price_usd == 0.0 and token_amount is not None and token_amount > 0:
+            _t0 = time.monotonic()
             try:
                 enriched = await self.birdeye.enrich_trade(trade.id, token_amount=token_amount)
                 if enriched:
                     await self.db.refresh(trade)
+                solana_trades_enriched_total.labels(result="success").inc()
             except Exception:
                 from app.core.logging import logger
                 logger.warning("birdeye_enrichment_failed", tx_signature=tx.signature)
+                solana_trades_enriched_total.labels(result="failed").inc()
+            finally:
+                _elapsed = (time.monotonic() - _t0) * 1000
+                solana_enrichment_latency.observe(_elapsed)
 
         event_payload = {
             "wallet_address": wallet_address,
@@ -104,6 +112,7 @@ class HeliusService:
                 )
             except Exception:
                 logger.critical("dlq_push_failed", tx_signature=tx.signature)
+        solana_webhook_processed_total.labels(status="processed").inc()
         return 1
 
     async def process_batch(self, transactions: list[HeliusTransaction], default_wallet: str | None = None) -> int:

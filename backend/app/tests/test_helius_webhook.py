@@ -1,12 +1,14 @@
 import uuid
 from datetime import datetime, timezone
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from httpx import AsyncClient
+from sqlalchemy.exc import IntegrityError
 
 from app.config import settings
 from app.core.events import EventBus
+from app.repositories.smart_wallet_repository import SmartWalletRepository
 from app.schemas.helius import HeliusTransaction, HeliusTokenTransfer
 from app.services.helius_service import HeliusService
 
@@ -147,6 +149,39 @@ class TestHeliusService:
         w1 = await service._ensure_wallet(addr)
         w2 = await service._ensure_wallet(addr)
         assert w1.id == w2.id
+
+    async def test_ensure_wallet_handles_integrityerror_race(self, db_session):
+        service = HeliusService(db_session)
+        addr = _make_wallet_address()
+
+        real_create = service.wallet_repo.create_wallet
+
+        async def race_create(*args, **kwargs):
+            await real_create(*args, **kwargs)
+            raise IntegrityError("test", "test", "test")
+
+        with patch.object(service.wallet_repo, "create_wallet", side_effect=race_create):
+            wallet = await service._ensure_wallet(addr)
+
+        assert wallet is not None
+        assert wallet.wallet_address == addr
+
+    async def test_process_swap_trade_eventbus_failure(self, db_session):
+        service = HeliusService(db_session)
+        tx = HeliusTransaction(**(_build_swap_tx()))
+
+        real_publish = EventBus.publish
+
+        async def fail_publish(*args, **kwargs):
+            raise ConnectionError("Redis unavailable")
+
+        with patch.object(EventBus, "publish", new=fail_publish):
+            count = await service.process_transaction(tx)
+
+        assert count == 1
+
+        trade = await service.trade_repo.get_by_signature(tx.signature)
+        assert trade is not None
 
 
 @pytest.mark.asyncio

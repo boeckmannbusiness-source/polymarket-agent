@@ -24,6 +24,8 @@ from .shadow_validation_snapshot import ShadowValidationSnapshot
 from .smart_wallet import SmartWallet
 from .wallet_trade import SolanaWalletTrade
 from .research_trade import ResearchTrade
+from .shadow_position import ShadowPosition
+from .research_hypothesis import ResearchHypothesis
 
 __all__ = [
     "Market",
@@ -61,4 +63,6 @@ __all__ = [
     "SmartWallet",
     "SolanaWalletTrade",
     "ResearchTrade",
+    "ResearchHypothesis",
+    "ShadowPosition",
 ]

@@ -5,6 +5,7 @@ from datetime import datetime, timedelta, timezone
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
+from app.core.metrics import solana_signals_generated_total
 from app.repositories.research_trade_repository import ResearchTradeRepository
 from app.repositories.smart_wallet_repository import SmartWalletRepository
 from app.repositories.wallet_trade_repository import WalletTradeRepository
@@ -109,6 +110,7 @@ class SignalSeedService:
         wallet_trade_id: uuid.UUID | None,
         signal_id: str,
     ) -> None:
+        solana_signals_generated_total.labels(strategy=strategy).inc()
         await self.research_repo.create_trade(
             strategy=strategy,
             entry_price=entry_price,
