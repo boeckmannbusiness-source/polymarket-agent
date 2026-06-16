@@ -10,8 +10,28 @@ from app.services.shadow.shadow_execution_service import (
 
 
 @pytest.fixture(autouse=True)
-def _no_redis():
-    with patch("app.services.shadow.shadow_execution_service.ShadowExecutionService._safe_redis", return_value=None):
+def _mock_redis():
+    mock_redis = MagicMock()
+    mock_pipe = MagicMock()
+    mock_pipe.execute = AsyncMock(return_value=[True])
+    mock_pipe.watch = AsyncMock()
+    mock_pipe.__aenter__ = AsyncMock(return_value=mock_pipe)
+    mock_pipe.__aexit__ = AsyncMock()
+    mock_redis.pipeline.return_value = mock_pipe
+
+    # Store executions in a dict for hget/hset
+    store = {}
+    async def hget(name, key):
+        return store.get(key)
+    async def hset(name, key, val):
+        store[key] = val
+        return 1
+
+    mock_redis.hget = AsyncMock(side_effect=hget)
+    mock_redis.hset = AsyncMock(side_effect=hset)
+    mock_pipe.hset = MagicMock(side_effect=lambda n, k, v: store.update({k: v}))
+
+    with patch("app.services.shadow.shadow_execution_service.ShadowExecutionService._safe_redis", return_value=mock_redis):
         yield
 
 
@@ -105,7 +125,7 @@ async def test_update_current_price_unrealized_pnl_buy():
     updated = service.get_execution(exec_.id)
     assert updated is not None
     assert updated.current_price == 0.7
-    assert updated.unrealized_pnl == pytest.approx(2.0)
+    assert updated.unrealized_pnl == pytest.approx(4.0)
 
 
 @pytest.mark.asyncio
@@ -119,7 +139,7 @@ async def test_update_current_price_unrealized_pnl_sell():
     updated = service.get_execution(exec_.id)
     assert updated is not None
     assert updated.current_price == 0.3
-    assert updated.unrealized_pnl == pytest.approx(2.0)
+    assert updated.unrealized_pnl == pytest.approx(4.0)
 
 
 @pytest.mark.asyncio
@@ -135,7 +155,7 @@ async def test_close_execution_buy():
     assert closed.status == "closed"
     assert closed.exit_price == 0.8
     assert closed.outcome_resolved is True
-    assert closed.realized_pnl == pytest.approx(3.0)
+    assert closed.realized_pnl == pytest.approx(6.0)
     assert closed.unrealized_pnl == 0.0
 
 
@@ -149,7 +169,7 @@ async def test_close_execution_sell():
     await service.close_execution(exec_.id, exit_price=0.2)
     closed = service.get_execution(exec_.id)
     assert closed is not None
-    assert closed.realized_pnl == pytest.approx(4.0)
+    assert closed.realized_pnl == pytest.approx(6.66666666)
 
 
 @pytest.mark.asyncio
@@ -279,7 +299,7 @@ async def test_get_strategy_performance():
     assert perf["total_executions"] == 2
     assert perf["closed_executions"] == 1
     assert perf["open_executions"] == 1
-    assert perf["total_realized_pnl"] == pytest.approx(3.0)
+    assert perf["total_realized_pnl"] == pytest.approx(6.0)
     assert perf["win_count"] == 1
     assert perf["loss_count"] == 0
     assert perf["win_rate"] == 1.0
@@ -318,7 +338,7 @@ async def test_get_overall_performance():
     assert overall["total_executions"] == 2
     assert overall["closed_executions"] == 1
     assert overall["open_executions"] == 1
-    assert overall["total_realized_pnl"] == pytest.approx(6.0)
+    assert overall["total_realized_pnl"] == pytest.approx(10.0)
     assert overall["strategy_count"] == 2
     assert overall["win_count"] == 1
     assert overall["loss_count"] == 0
@@ -396,5 +416,6 @@ async def test_close_execution_sets_unrealized_to_zero():
 @pytest.mark.asyncio
 async def test_safe_redis_returns_none_when_unavailable():
     service = _fresh_service()
-    result = await service._safe_redis()
-    assert result is None
+    with patch("app.services.shadow.shadow_execution_service.ShadowExecutionService._safe_redis", return_value=None):
+        result = await service._safe_redis()
+        assert result is None

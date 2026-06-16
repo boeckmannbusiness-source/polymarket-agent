@@ -4,6 +4,7 @@ import asyncio
 from datetime import datetime, timezone, timedelta
 from dataclasses import dataclass, asdict
 from typing import Any
+from decimal import Decimal
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -118,16 +119,55 @@ class ShadowExecutionService:
     async def update_current_price(
         self, execution_id: str, current_price: float
     ) -> ShadowExecution | None:
-        execution = self._executions.get(execution_id)
-        if not execution or execution.status == "closed":
+        from app.services.shadow.pnl_utils import compute_shadow_pnl
+        r = await self._safe_redis()
+        if not r:
             return None
-        execution.current_price = current_price
-        if execution.direction == "buy":
-            execution.unrealized_pnl = (current_price - execution.entry_price) * execution.size
-        else:
-            execution.unrealized_pnl = (execution.entry_price - current_price) * execution.size
-        await self._save_to_redis(execution)
-        return execution
+
+        retries = 0
+        async with r.pipeline(transaction=True) as pipe:
+            while retries < 5:
+                try:
+                    await pipe.watch(SHADOW_EXECUTIONS_HASH)
+                    raw = await r.hget(SHADOW_EXECUTIONS_HASH, execution_id)
+                    if not raw:
+                        return None
+
+                    data = json.loads(raw)
+                    execution = ShadowExecution(**data)
+
+                    if execution.status == "closed":
+                        return None
+
+                    execution.current_price = current_price
+                    # size is USD not quantity
+                    pnl = compute_shadow_pnl(
+                        entry_price=Decimal(str(execution.entry_price)),
+                        exit_price=Decimal(str(current_price)),
+                        size_usd=Decimal(str(execution.size))
+                    )
+                    if execution.direction == "buy":
+                        execution.unrealized_pnl = float(pnl)
+                    else:
+                        execution.unrealized_pnl = -float(pnl)
+
+                    pipe.multi()
+                    pipe.hset(
+                        SHADOW_EXECUTIONS_HASH,
+                        execution_id,
+                        json.dumps(asdict(execution), default=str),
+                    )
+                    await pipe.execute()
+                    self._executions[execution_id] = execution
+                    return execution
+                except Exception as e:
+                    retries += 1
+                    if retries >= 5:
+                        logger.error("shadow_execution_redis_update_failed", id=execution_id, error=str(e), exc_info=True)
+                        return None
+                    await asyncio.sleep(0.01)
+                    continue
+        return None
 
     async def close_execution(
         self,
@@ -135,22 +175,62 @@ class ShadowExecutionService:
         exit_price: float,
         exit_timestamp: str | None = None,
     ) -> ShadowExecution | None:
-        execution = self._executions.get(execution_id)
-        if not execution or execution.status == "closed":
+        from app.services.shadow.pnl_utils import compute_shadow_pnl
+        r = await self._safe_redis()
+        if not r:
             return None
-        execution.exit_price = exit_price
-        execution.exit_timestamp = exit_timestamp or datetime.now(timezone.utc).isoformat()
-        execution.outcome_resolved = True
-        execution.resolution_price = exit_price
-        execution.status = "closed"
-        if execution.direction == "buy":
-            execution.realized_pnl = (exit_price - execution.entry_price) * execution.size
-        else:
-            execution.realized_pnl = (execution.entry_price - exit_price) * execution.size
-        execution.unrealized_pnl = 0.0
-        await self._save_to_redis(execution)
-        logger.info("shadow_execution_closed", id=execution_id, pnl=execution.realized_pnl)
-        return execution
+
+        retries = 0
+        async with r.pipeline(transaction=True) as pipe:
+            while retries < 5:
+                try:
+                    await pipe.watch(SHADOW_EXECUTIONS_HASH)
+                    raw = await r.hget(SHADOW_EXECUTIONS_HASH, execution_id)
+                    if not raw:
+                        return None
+
+                    data = json.loads(raw)
+                    execution = ShadowExecution(**data)
+
+                    if execution.status == "closed":
+                        return None
+
+                    execution.exit_price = exit_price
+                    execution.exit_timestamp = exit_timestamp or datetime.now(timezone.utc).isoformat()
+                    execution.outcome_resolved = True
+                    execution.resolution_price = exit_price
+                    execution.status = "closed"
+
+                    # size is USD not quantity
+                    pnl = compute_shadow_pnl(
+                        entry_price=Decimal(str(execution.entry_price)),
+                        exit_price=Decimal(str(exit_price)),
+                        size_usd=Decimal(str(execution.size))
+                    )
+                    if execution.direction == "buy":
+                        execution.realized_pnl = float(pnl)
+                    else:
+                        execution.realized_pnl = -float(pnl)
+                    execution.unrealized_pnl = 0.0
+
+                    pipe.multi()
+                    pipe.hset(
+                        SHADOW_EXECUTIONS_HASH,
+                        execution_id,
+                        json.dumps(asdict(execution), default=str),
+                    )
+                    await pipe.execute()
+                    self._executions[execution_id] = execution
+                    logger.info("shadow_execution_closed", id=execution_id, pnl=execution.realized_pnl)
+                    return execution
+                except Exception as e:
+                    retries += 1
+                    if retries >= 5:
+                        logger.error("shadow_execution_redis_close_failed", id=execution_id, error=str(e), exc_info=True)
+                        return None
+                    await asyncio.sleep(0.01)
+                    continue
+        return None
 
     async def process_signal(self, signal: dict[str, Any]) -> ShadowExecution | None:
         entry_price = signal.get("estimated_probability") or signal.get("implied_probability") or 0.5

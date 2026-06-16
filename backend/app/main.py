@@ -147,8 +147,8 @@ async def lifespan(app: FastAPI):
             ]:
                 try:
                     await r.xgroup_destroy(stream, group)
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.warning("shadow_xgroup_destroy_failed", stream=stream, group=group, error=str(e), exc_info=True)
                 try:
                     await r.xgroup_create(stream, group, id="$", mkstream=True)
                     logger.info("shadow_consumer_group_reset", stream=stream, group=group)
@@ -192,7 +192,7 @@ async def lifespan(app: FastAPI):
             else:
                 logger.info("redis_aof_enabled")
         except Exception as e:
-            logger.warning("redis_config_validation_failed", error=str(e))
+            logger.error("redis_config_validation_failed", error=str(e), exc_info=True)
 
         from app.core.stream_registry import StreamRegistry
         for config in StreamRegistry.active_in_phase1():
@@ -505,8 +505,8 @@ async def _periodic_redis_cleanup():
                         logger.critical("stream_pressure_critical", stream=s, length=current_len, maxlen=maxlen, pct=pct)
                     elif pct >= 80:
                         logger.warning("stream_pressure_warning", stream=s, length=current_len, maxlen=maxlen, pct=pct)
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.warning("stream_pressure_monitor_failed", stream=s, error=str(e), exc_info=True)
 
             approx = settings.STREAM_TRIM_APPROX
             if approx:
@@ -703,8 +703,8 @@ async def _periodic_pool_monitor():
                 db_pool_size.labels(state="available").set(available)
         except asyncio.CancelledError:
             break
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning("pool_monitor_failed", error=str(e), exc_info=True)
         await asyncio.sleep(60)
 
 
@@ -1322,10 +1322,19 @@ async def _shadow_price_tracker_loop():
 
                 distinct_mints = list(set(rt_to_mint.values()))
                 mint_to_price: dict[str, float] = {}
-                for mint in distinct_mints:
-                    result = await price_svc.resolve_price(mint)
-                    if result.price is not None:
-                        mint_to_price[mint] = float(result.price)
+
+                # Optimized: Resolve prices in parallel with concurrency limit
+                sem = asyncio.Semaphore(10)
+
+                async def resolve_with_sem(m):
+                    async with sem:
+                        res = await price_svc.resolve_price(m)
+                        return m, res
+
+                results = await asyncio.gather(*[resolve_with_sem(m) for m in distinct_mints])
+                for mint, res in results:
+                    if res.price is not None:
+                        mint_to_price[mint] = float(res.price)
 
                 updated = 0
                 for pos in open_positions:
@@ -1341,8 +1350,8 @@ async def _shadow_price_tracker_loop():
                     logger.info("shadow_price_tracker_updated", count=updated)
         except asyncio.CancelledError:
             break
-        except Exception:
-            logger.warning("shadow_price_tracker_error", exc_info=True)
+        except Exception as e:
+            logger.error("shadow_price_tracker_fatal_error", error=str(e), exc_info=True)
             await asyncio.sleep(5)
             continue
         await asyncio.sleep(settings.SOLANA_SHADOW_EVAL_INTERVAL)
@@ -1363,8 +1372,8 @@ async def _shadow_eval_loop():
                     logger.info("shadow_eval_closed_positions", count=len(closed))
         except asyncio.CancelledError:
             break
-        except Exception:
-            logger.warning("shadow_eval_loop_error", exc_info=True)
+        except Exception as e:
+            logger.error("shadow_eval_loop_fatal_error", error=str(e), exc_info=True)
             await asyncio.sleep(5)
             continue
         await asyncio.sleep(settings.SOLANA_SHADOW_EVAL_INTERVAL)
