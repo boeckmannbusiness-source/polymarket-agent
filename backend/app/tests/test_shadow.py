@@ -105,7 +105,7 @@ async def test_update_current_price_unrealized_pnl_buy():
     updated = service.get_execution(exec_.id)
     assert updated is not None
     assert updated.current_price == 0.7
-    assert updated.unrealized_pnl == pytest.approx(2.0)
+    assert updated.unrealized_pnl == pytest.approx(4.0)
 
 
 @pytest.mark.asyncio
@@ -119,7 +119,7 @@ async def test_update_current_price_unrealized_pnl_sell():
     updated = service.get_execution(exec_.id)
     assert updated is not None
     assert updated.current_price == 0.3
-    assert updated.unrealized_pnl == pytest.approx(2.0)
+    assert updated.unrealized_pnl == pytest.approx(4.0)
 
 
 @pytest.mark.asyncio
@@ -135,7 +135,7 @@ async def test_close_execution_buy():
     assert closed.status == "closed"
     assert closed.exit_price == 0.8
     assert closed.outcome_resolved is True
-    assert closed.realized_pnl == pytest.approx(3.0)
+    assert closed.realized_pnl == pytest.approx(6.0)
     assert closed.unrealized_pnl == 0.0
 
 
@@ -149,7 +149,7 @@ async def test_close_execution_sell():
     await service.close_execution(exec_.id, exit_price=0.2)
     closed = service.get_execution(exec_.id)
     assert closed is not None
-    assert closed.realized_pnl == pytest.approx(4.0)
+    assert closed.realized_pnl == pytest.approx(6.66666666)
 
 
 @pytest.mark.asyncio
@@ -279,7 +279,7 @@ async def test_get_strategy_performance():
     assert perf["total_executions"] == 2
     assert perf["closed_executions"] == 1
     assert perf["open_executions"] == 1
-    assert perf["total_realized_pnl"] == pytest.approx(3.0)
+    assert perf["total_realized_pnl"] == pytest.approx(6.0)
     assert perf["win_count"] == 1
     assert perf["loss_count"] == 0
     assert perf["win_rate"] == 1.0
@@ -318,7 +318,7 @@ async def test_get_overall_performance():
     assert overall["total_executions"] == 2
     assert overall["closed_executions"] == 1
     assert overall["open_executions"] == 1
-    assert overall["total_realized_pnl"] == pytest.approx(6.0)
+    assert overall["total_realized_pnl"] == pytest.approx(10.0)
     assert overall["strategy_count"] == 2
     assert overall["win_count"] == 1
     assert overall["loss_count"] == 0

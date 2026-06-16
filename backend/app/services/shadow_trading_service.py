@@ -90,10 +90,12 @@ class ShadowTradingService:
         if exit_price is not None:
             pos.exit_price = exit_price
             pos.exit_timestamp = datetime.now(timezone.utc)
+            # Canonical formula: quantity = size / entry_price; pnl = (exit - entry) * quantity
+            quantity = pos.size / pos.entry_price if pos.entry_price > 0 else 0
             if pos.side == "buy":
-                pos.pnl = (exit_price - pos.entry_price) * pos.size
+                pos.pnl = (exit_price - pos.entry_price) * quantity
             else:
-                pos.pnl = (pos.entry_price - exit_price) * pos.size
+                pos.pnl = (pos.entry_price - exit_price) * quantity
 
         pos.slippage = slippage
         pos.latency_ms = latency_ms

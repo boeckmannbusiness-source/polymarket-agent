@@ -122,10 +122,12 @@ class ShadowExecutionService:
         if not execution or execution.status == "closed":
             return None
         execution.current_price = current_price
+        # Canonical formula: quantity = size / entry_price; pnl = (current - entry) * quantity
+        quantity = execution.size / execution.entry_price if execution.entry_price > 0 else 0
         if execution.direction == "buy":
-            execution.unrealized_pnl = (current_price - execution.entry_price) * execution.size
+            execution.unrealized_pnl = (current_price - execution.entry_price) * quantity
         else:
-            execution.unrealized_pnl = (execution.entry_price - current_price) * execution.size
+            execution.unrealized_pnl = (execution.entry_price - current_price) * quantity
         await self._save_to_redis(execution)
         return execution
 
@@ -143,10 +145,12 @@ class ShadowExecutionService:
         execution.outcome_resolved = True
         execution.resolution_price = exit_price
         execution.status = "closed"
+        # Canonical formula: quantity = size / entry_price; pnl = (exit - entry) * quantity
+        quantity = execution.size / execution.entry_price if execution.entry_price > 0 else 0
         if execution.direction == "buy":
-            execution.realized_pnl = (exit_price - execution.entry_price) * execution.size
+            execution.realized_pnl = (exit_price - execution.entry_price) * quantity
         else:
-            execution.realized_pnl = (execution.entry_price - exit_price) * execution.size
+            execution.realized_pnl = (execution.entry_price - exit_price) * quantity
         execution.unrealized_pnl = 0.0
         await self._save_to_redis(execution)
         logger.info("shadow_execution_closed", id=execution_id, pnl=execution.realized_pnl)
