@@ -10,8 +10,28 @@ from app.services.shadow.shadow_execution_service import (
 
 
 @pytest.fixture(autouse=True)
-def _no_redis():
-    with patch("app.services.shadow.shadow_execution_service.ShadowExecutionService._safe_redis", return_value=None):
+def _mock_redis():
+    mock_redis = MagicMock()
+    mock_pipe = MagicMock()
+    mock_pipe.execute = AsyncMock(return_value=[True])
+    mock_pipe.watch = AsyncMock()
+    mock_pipe.__aenter__ = AsyncMock(return_value=mock_pipe)
+    mock_pipe.__aexit__ = AsyncMock()
+    mock_redis.pipeline.return_value = mock_pipe
+
+    # Store executions in a dict for hget/hset
+    store = {}
+    async def hget(name, key):
+        return store.get(key)
+    async def hset(name, key, val):
+        store[key] = val
+        return 1
+
+    mock_redis.hget = AsyncMock(side_effect=hget)
+    mock_redis.hset = AsyncMock(side_effect=hset)
+    mock_pipe.hset = MagicMock(side_effect=lambda n, k, v: store.update({k: v}))
+
+    with patch("app.services.shadow.shadow_execution_service.ShadowExecutionService._safe_redis", return_value=mock_redis):
         yield
 
 
@@ -396,5 +416,6 @@ async def test_close_execution_sets_unrealized_to_zero():
 @pytest.mark.asyncio
 async def test_safe_redis_returns_none_when_unavailable():
     service = _fresh_service()
-    result = await service._safe_redis()
-    assert result is None
+    with patch("app.services.shadow.shadow_execution_service.ShadowExecutionService._safe_redis", return_value=None):
+        result = await service._safe_redis()
+        assert result is None

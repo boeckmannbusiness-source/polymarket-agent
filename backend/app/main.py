@@ -148,7 +148,7 @@ async def lifespan(app: FastAPI):
                 try:
                     await r.xgroup_destroy(stream, group)
                 except Exception as e:
-                    logger.debug("shadow_xgroup_destroy_failed", stream=stream, group=group, error=str(e))
+                    logger.warning("shadow_xgroup_destroy_failed", stream=stream, group=group, error=str(e), exc_info=True)
                 try:
                     await r.xgroup_create(stream, group, id="$", mkstream=True)
                     logger.info("shadow_consumer_group_reset", stream=stream, group=group)
@@ -506,7 +506,7 @@ async def _periodic_redis_cleanup():
                     elif pct >= 80:
                         logger.warning("stream_pressure_warning", stream=s, length=current_len, maxlen=maxlen, pct=pct)
                 except Exception as e:
-                    logger.debug("stream_pressure_monitor_failed", stream=s, error=str(e))
+                    logger.warning("stream_pressure_monitor_failed", stream=s, error=str(e), exc_info=True)
 
             approx = settings.STREAM_TRIM_APPROX
             if approx:
@@ -704,7 +704,7 @@ async def _periodic_pool_monitor():
         except asyncio.CancelledError:
             break
         except Exception as e:
-            logger.debug("pool_monitor_failed", error=str(e))
+            logger.warning("pool_monitor_failed", error=str(e), exc_info=True)
         await asyncio.sleep(60)
 
 
