@@ -63,27 +63,30 @@ class AllocationEngine:
         return {s: 1.0 / n for s in strategies}
 
     async def _sharpe_weight(self, strategies: list[str]) -> dict[str, float]:
-        weights = {}
-        for s in strategies:
-            analytics = await analytics_service.get_strategy_analytics(s)
-            w = max(analytics.sharpe_ratio, 0.0) + 0.01
-            weights[s] = w
+        if not strategies:
+            return {}
+        analytics_list = await asyncio.gather(
+            *[analytics_service.get_strategy_analytics(s) for s in strategies]
+        )
+        weights = {s: max(a.sharpe_ratio, 0.0) + 0.01 for s, a in zip(strategies, analytics_list)}
         return self._normalize(weights)
 
     async def _risk_parity_weight(self, strategies: list[str]) -> dict[str, float]:
-        weights = {}
-        for s in strategies:
-            analytics = await analytics_service.get_strategy_analytics(s)
-            risk = max(analytics.max_drawdown, 0.01)
-            weights[s] = 1.0 / risk
+        if not strategies:
+            return {}
+        analytics_list = await asyncio.gather(
+            *[analytics_service.get_strategy_analytics(s) for s in strategies]
+        )
+        weights = {s: max(a.max_drawdown, 0.01) for s, a in zip(strategies, analytics_list)}
         return self._normalize(weights)
 
     async def _confidence_weight(self, strategies: list[str]) -> dict[str, float]:
-        weights = {}
-        for s in strategies:
-            promotion = await promotion_service.evaluate_strategy(s)
-            w = max(promotion.confidence_score, 1.0)
-            weights[s] = w
+        if not strategies:
+            return {}
+        promotion_list = await asyncio.gather(
+            *[promotion_service.evaluate_strategy(s) for s in strategies]
+        )
+        weights = {s: max(p.confidence_score, 1.0) for s, p in zip(strategies, promotion_list)}
         return self._normalize(weights)
 
     async def _hybrid_weight(self, strategies: list[str]) -> dict[str, float]:

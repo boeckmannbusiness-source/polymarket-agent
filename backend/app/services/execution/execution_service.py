@@ -11,8 +11,10 @@ from app.exchanges import ExchangeAdapterRegistry
 from app.domain.execution import ExecutionIntent, ExecutionResult, Instrument
 from app.domain.markets import InstrumentId
 from app.domain.signals import Signal, SignalAction
+from app.domain.planning.execution_constraints import ExecutionConstraints
 from app.services.execution.translators import GenericTranslator, PolymarketTranslator
 from app.services.market_registry import MarketRegistry
+from app.services.planning import Planner, create_default_planner
 from app.core.logging import logger
 from app.core import metrics
 from app.services.control.control_plane import control_plane
@@ -44,6 +46,57 @@ execution_result_shadow_total = metrics.Counter(
     "polymarket_execution_result_shadow_total", "Shadow execution results tracked"
 )
 
+# Sprint 1.4 instruction-level metrics
+execution_instruction_total = metrics.Counter(
+    "polymarket_execution_instruction_total", "Total instructions executed", ["adapter", "instruction_type"]
+)
+execution_fill_total = metrics.Counter(
+    "polymarket_execution_fill_total", "Total fills generated", ["adapter"]
+)
+execution_slippage_bps_histogram = metrics.Histogram(
+    "polymarket_execution_slippage_bps", "Slippage in bps per execution",
+    buckets=[0, 5, 10, 25, 50, 100, 200, 500, 1000],
+)
+execution_fee_total_lamports = metrics.Counter(
+    "polymarket_execution_fee_total_lamports", "Total fees in lamports", ["adapter"]
+)
+execution_route_complexity = metrics.Gauge(
+    "polymarket_execution_route_complexity", "Route complexity (number of hops)", ["route_type"]
+)
+
+# Sprint 1.5 shadow feedback loop metrics
+shadow_portfolio_updates_total = metrics.Counter(
+    "polymarket_shadow_portfolio_updates_total", "Shadow portfolio updates applied"
+)
+shadow_position_projection_total = metrics.Counter(
+    "polymarket_shadow_position_projection_total", "Shadow position projections generated"
+)
+shadow_execution_feedback_total = metrics.Counter(
+    "polymarket_shadow_execution_feedback_total", "Shadow execution feedback records created"
+)
+shadow_route_efficiency_histogram = metrics.Histogram(
+    "polymarket_shadow_route_efficiency", "Route efficiency score (0-1)",
+    buckets=[0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0],
+)
+
+# Sprint 1.7 replay & determinism metrics
+replay_execution_total = metrics.Counter(
+    "polymarket_replay_execution_total", "Total replay executions"
+)
+replay_determinism_failures_total = metrics.Counter(
+    "polymarket_replay_determinism_failures_total", "Replay determinism mismatches"
+)
+replay_fingerprint_mismatch_total = metrics.Counter(
+    "polymarket_replay_fingerprint_mismatch_total", "Replay fingerprint mismatches"
+)
+replay_validation_latency_ms = metrics.Histogram(
+    "polymarket_replay_validation_latency_ms", "Replay validation latency (ms)",
+    buckets=[1, 5, 10, 25, 50, 100, 250],
+)
+shadow_projected_pnl = metrics.Gauge(
+    "polymarket_shadow_projected_pnl", "Projected PnL from shadow feedback", ["execution_id"]
+)
+
 
 def _next_trace_id() -> str:
     global _TRACE_ID
@@ -70,8 +123,9 @@ class ExecutionSafetyError(Exception):
 
 
 class ExecutionService:
-    def __init__(self, db: AsyncSession):
+    def __init__(self, db: AsyncSession, planner: Planner | None = None):
         self.db = db
+        self._planner = planner or create_default_planner()
 
     def _get_adapter(self, engine_type: str):
         adapter_cls = ExchangeAdapterRegistry.get(engine_type)
@@ -164,6 +218,14 @@ class ExecutionService:
             quote_asset=signal.instrument.quote_asset,
             metadata=signal.instrument.metadata,
         )
+        slippage = int(signal.instrument.metadata.get("slippage_bps", 100)) if signal.instrument.metadata else 100
+        constraints = ExecutionConstraints(max_slippage_bps=slippage)
+        plan = await self._planner.plan(
+            instrument=resolved,
+            amount_in=signal.quantity or Decimal("0"),
+            side=side,
+            constraints=constraints,
+        )
         return ExecutionIntent(
             instrument=resolved,
             side=side,
@@ -171,6 +233,7 @@ class ExecutionService:
             order_type="market",
             strategy_id=signal.metadata.get("strategy_id") if signal.metadata else None,
             metadata=signal.metadata,
+            transaction_plan=plan,
         )
 
     async def execute_signal(self, signal: Signal, engine_type: str = "paper"):
@@ -217,6 +280,20 @@ class ExecutionService:
             trace_id=trace_id,
         )
 
+        if result.fills:
+            execution_fill_total.labels(adapter=result.adapter).inc(len(result.fills))
+        if result.simulated_slippage is not None:
+            execution_slippage_bps_histogram.observe(result.simulated_slippage * 10000)
+        if result.fees is not None:
+            execution_fee_total_lamports.labels(adapter=result.adapter).inc(float(result.fees * Decimal("1000000")))
+        if result.execution_path:
+            execution_route_complexity.labels(route_type="DIRECT" if len(result.execution_path) <= 1 else "SPLIT").set(len(result.execution_path))
+        if result.instruction_trace:
+            for instr_type in result.instruction_trace:
+                execution_instruction_total.labels(adapter=result.adapter, instruction_type=instr_type).inc()
+                if result.execution_path:
+                    execution_route_complexity.labels(route_type="DIRECT" if len(result.execution_path) <= 1 else "SPLIT").set(len(result.execution_path))
+
         try:
             from app.services.shadow.shadow_execution_service import shadow_execution_service
             exec_meta = result.metadata or {}
@@ -232,6 +309,81 @@ class ExecutionService:
             execution_result_shadow_total.inc()
         except Exception as e:
             logger.debug("shadow_execution_log_skipped", error=str(e))
+
+        await self._shadow_feedback_loop(result, trace_id=trace_id)
+        await self._replay_integration(result, trace_id=trace_id)
+
+    async def _shadow_feedback_loop(self, result: ExecutionResult, trace_id: str = "") -> None:
+        try:
+            from app.services.shadow.portfolio_projector import PortfolioProjector
+            from app.services.shadow.shadow_portfolio import ShadowPortfolio
+            from app.services.shadow.execution_feedback_service import ExecutionFeedbackService
+
+            projector = PortfolioProjector()
+            shadow_portfolio = ShadowPortfolio()
+            feedback_service = ExecutionFeedbackService(projector)
+
+            projections = projector.project(result, current=None)
+            if projections:
+                shadow_position_projection_total.inc(len(projections))
+
+            snapshot = shadow_portfolio.apply(result, current=None)
+            shadow_portfolio_updates_total.inc()
+
+            feedback = feedback_service.create(result, snapshot)
+            shadow_execution_feedback_total.inc()
+            shadow_route_efficiency_histogram.observe(feedback.route_efficiency)
+            shadow_projected_pnl.labels(execution_id=result.execution_id).set(feedback.portfolio_delta)
+
+            await emit("shadow.execution.completed", "shadow", result.execution_id, {
+                "trace_id": trace_id,
+                "execution_id": result.execution_id,
+                "status": result.status,
+                "projections": len(projections),
+                "portfolio_delta": round(feedback.portfolio_delta, 4),
+                "route_efficiency": round(feedback.route_efficiency, 4),
+                "slippage_bps": round(feedback.slippage_realized, 2),
+                "latency_ms": round(feedback.latency_ms, 2),
+            })
+
+            await self._consistency_validation(result, snapshot, projections, feedback, trace_id)
+        except Exception as e:
+            logger.debug("shadow_feedback_loop_skipped", error=str(e), trace_id=trace_id)
+
+    async def _consistency_validation(
+        self,
+        result: ExecutionResult,
+        snapshot: PortfolioSnapshot,
+        projections: list[PositionProjection],
+        feedback: ExecutionFeedback,
+        trace_id: str = "",
+    ) -> None:
+        try:
+            from app.services.consistency.execution_consistency_layer import ExecutionConsistencyLayer
+
+            layer = ExecutionConsistencyLayer()
+            bundle = layer.validate(result, snapshot, projections, feedback)
+
+            await emit("execution.consistency.validated", "consistency", result.execution_id, {
+                "trace_id": trace_id,
+                "execution_id": result.execution_id,
+                "all_passed": bundle.report.all_passed,
+                "checks": len(bundle.report.checks),
+                "failed": len(bundle.report.failed_checks),
+            })
+
+            if not bundle.report.all_passed:
+                for check in bundle.report.failed_checks:
+                    logger.warning(
+                        "consistency_check_failed",
+                        execution_id=result.execution_id,
+                        check=check.name,
+                        expected=check.expected,
+                        actual=check.actual,
+                        trace_id=trace_id,
+                    )
+        except Exception as e:
+            logger.debug("consistency_validation_skipped", error=str(e), trace_id=trace_id)
 
     async def create_trade_execution(self, trade: Trade):
         trace_id = _next_trace_id()

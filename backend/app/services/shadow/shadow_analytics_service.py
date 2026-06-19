@@ -204,8 +204,15 @@ class ShadowAnalyticsService:
 
         await self._load()
         filtered = self._filter_by_date(self._executions, start, end)
-        strategies = set(e.strategy for e in filtered)
-        results = [self._compute_strategy_analytics(filtered, s) for s in sorted(strategies)]
+        strategies = sorted(set(e.strategy for e in filtered))
+
+        if not strategies:
+            results = []
+        else:
+            results = await asyncio.gather(
+                *[self._compute_strategy_analytics(filtered, s) for s in strategies]
+            )
+
         await self._set_cache(cache_key, [r.model_dump() for r in results])
         return results
 

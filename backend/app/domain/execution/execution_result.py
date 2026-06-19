@@ -22,4 +22,10 @@ class ExecutionResult(BaseModel):
     quantity_executed: Decimal | None = None
     fees: Decimal | None = None
     latency_ms: float | None = None
+    simulated: bool = False
+    fill_model: str | None = None
+    execution_path: list[str] | None = None
+    simulated_slippage: float | None = None
+    simulated_latency_ms: float | None = None
+    instruction_trace: list[str] | None = None
     metadata: dict | None = None

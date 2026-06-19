@@ -134,7 +134,11 @@ class StrategyTournamentService:
             return []
 
         rankings: list[TournamentRanking] = []
-        for s in sorted(strategies):
+
+        if len(strategies) <= 1:
+            strategies = sorted(strategies)
+
+        for s in strategies:
             analytics = await analytics_service.get_strategy_analytics(s)
             benchmark = await benchmark_service.get_strategy_benchmark(s)
             promotion = await promotion_service.evaluate_strategy(s)
