@@ -31,7 +31,15 @@ class ExecutionFingerprint:
                 "slippage_bps": plan.slippage_bps,
                 "estimated_fees": plan.estimated_fees,
                 "instruction_types": [i.instruction_type for i in plan.instructions],
-                "route_venue": plan.route.venue if plan.route else None,
+                "route": {
+                    "venue": plan.route.venue if plan.route else None,
+                    "route_type": plan.route.route_type if plan.route else None,
+                    "hops": plan.route.hops if plan.route else [],
+                },
+                "quote": {
+                    "source": plan.quote.source if plan.quote else None,
+                    "estimated_price": str(plan.quote.estimated_price) if plan.quote else None,
+                }
             }
 
         payload["result"] = {

@@ -170,3 +170,13 @@ def register_default_breakers():
     cb_system.register(CircuitBreaker("execution_failure", exec_fail_check, cooldown=300))
     cb_system.register(CircuitBreaker("latency_spike", latency_check, cooldown=300))
     cb_system.register(CircuitBreaker("drift_breaker", drift_check, cooldown=600))
+
+
+def track_execution_failure():
+    """Stub for tracking execution failures for circuit breaker evaluation."""
+    pass
+
+
+def track_execution_latency(latency_ms: float):
+    """Stub for tracking execution latency for circuit breaker evaluation."""
+    pass

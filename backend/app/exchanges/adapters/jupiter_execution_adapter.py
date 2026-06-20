@@ -3,6 +3,7 @@ from app.exchanges.adapters.base_execution_adapter import BaseExecutionAdapter
 from app.domain.execution import ExecutionIntent, ExecutionResult
 from app.domain.planning.transaction_plan import TransactionPlan
 from app.services.execution.simulation import ExecutionSimulator
+from app.domain.replay.replay_seed import ReplaySeed
 
 
 class JupiterExecutionAdapter(BaseExchangeAdapter, BaseExecutionAdapter):
@@ -18,8 +19,8 @@ class JupiterExecutionAdapter(BaseExchangeAdapter, BaseExecutionAdapter):
 
     # ── BaseExecutionAdapter interface ─────────────────────────
 
-    async def execute(self, plan: TransactionPlan) -> ExecutionResult:
-        return await self._simulator.simulate(plan, adapter_name="jupiter_simulated")
+    async def execute(self, plan: TransactionPlan, seed: ReplaySeed | None = None) -> ExecutionResult:
+        return await self._simulator.simulate(plan, adapter_name="jupiter_simulated", seed=seed)
 
     async def health_check(self) -> dict:
         return {"status": "simulated", "adapter": "jupiter_simulated"}
@@ -31,7 +32,14 @@ class JupiterExecutionAdapter(BaseExchangeAdapter, BaseExecutionAdapter):
 
     async def submit_order(self, intent: ExecutionIntent) -> ExecutionResult:
         if intent.transaction_plan is not None:
-            return await self.execute(intent.transaction_plan)
+            seed = None
+            if intent.metadata and "seed" in intent.metadata:
+                seed_data = intent.metadata["seed"]
+                if isinstance(seed_data, ReplaySeed):
+                    seed = seed_data
+                elif isinstance(seed_data, dict):
+                    seed = ReplaySeed(**seed_data)
+            return await self.execute(intent.transaction_plan, seed=seed)
         raise NotImplementedError(
             "JupiterExecutionAdapter requires a TransactionPlan. "
             "Use planner.plan() before submitting."
