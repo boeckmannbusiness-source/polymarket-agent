@@ -48,8 +48,8 @@ class ExecutionFingerprint:
             "quantity_executed": str(result.quantity_executed) if result.quantity_executed else None,
             "average_price": str(result.average_price) if result.average_price else None,
             "fees": str(result.fees) if result.fees else None,
-            "simulated_slippage": result.simulated_slippage,
-            "simulated_latency_ms": result.simulated_latency_ms,
+            "simulated_slippage": round(result.simulated_slippage, 6) if result.simulated_slippage is not None else None,
+            "simulated_latency_ms": round(result.simulated_latency_ms, 2) if result.simulated_latency_ms is not None else None,
             "instruction_trace": result.instruction_trace,
             "execution_path": result.execution_path,
         }

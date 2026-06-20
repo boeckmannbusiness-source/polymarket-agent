@@ -59,8 +59,10 @@ class ExecutionSimulator:
 
         if seed:
             completed_at = submitted_at
+            latency_ms = simulated_latency
         else:
             completed_at = datetime.now(timezone.utc)
+            latency_ms = max(elapsed, simulated_latency)
 
         return ExecutionResult(
             execution_id=execution_id,
@@ -72,12 +74,13 @@ class ExecutionSimulator:
             average_price=avg_price,
             quantity_executed=total_executed,
             fees=total_fees,
-            latency_ms=max(elapsed, simulated_latency),
+            latency_ms=latency_ms,
             simulated=True,
             fill_model="slippage_linear",
             execution_path=execution_path,
             simulated_slippage=float(plan.slippage_bps or 0) / 10000.0,
             simulated_latency_ms=simulated_latency,
+            instruction_trace=execution_path,
             metadata={
                 "instruction_count": len(plan.instructions),
                 "route_type": plan.route.route_type if plan.route else "unknown",

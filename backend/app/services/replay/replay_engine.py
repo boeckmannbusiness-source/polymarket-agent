@@ -47,7 +47,7 @@ class ReplayEngine:
 
         return ExecutionResult(
             execution_id=execution_id,
-            adapter=trace.plan.quote.source if trace.plan.quote and trace.plan.quote.source else "replay",
+            adapter=trace.plan.quote.source if trace.plan.quote and trace.plan.quote.source and trace.plan.quote.source != "jupiter_simulated" else "jupiter_simulated",
             status="filled",
             submitted_at=submitted_at,
             completed_at=completed_at,
@@ -58,10 +58,10 @@ class ReplayEngine:
             latency_ms=trace.latency_ms,
             simulated=True,
             fill_model="slippage_linear",
-            execution_path=trace.instruction_trace_snapshot,
+            execution_path=trace.instruction_trace_snapshot or [],
             simulated_slippage=float(trace.plan.slippage_bps or 0) / 10000.0,
             simulated_latency_ms=trace.latency_ms,
-            instruction_trace=trace.instruction_trace_snapshot,
+            instruction_trace=trace.instruction_trace_snapshot or [],
             metadata={
                 "replayed": True,
                 "original_execution_id": trace.execution_id,
@@ -80,12 +80,17 @@ class ReplayEngine:
         fill_sizes = [f.size for f in (result.fills or [])]
         fill_fees = [f.fee or Decimal("0") for f in (result.fills or [])]
 
+        # Use execution_path if instruction_trace is None (backward compatibility with simulator)
+        trace_snapshot = result.instruction_trace
+        if trace_snapshot is None and result.execution_path:
+            trace_snapshot = result.execution_path
+
         trace = ExecutionTrace(
             execution_id=result.execution_id,
             intent=intent,
             plan=plan,
             seed=seed,
-            instruction_trace_snapshot=result.instruction_trace or [],
+            instruction_trace_snapshot=trace_snapshot or [],
             fill_prices=fill_prices,
             fill_sizes=fill_sizes,
             fill_fees=fill_fees,
