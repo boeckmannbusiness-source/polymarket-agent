@@ -1,6 +1,7 @@
 import asyncio
 import time
 import uuid
+from typing import Any
 from decimal import Decimal
 
 from sqlalchemy import select
@@ -9,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models import Trade, ExchangeOrder
 from app.exchanges import ExchangeAdapterRegistry
 from app.domain.execution import ExecutionIntent, ExecutionResult, Instrument
+from app.domain.planning.transaction_plan import TransactionPlan
 from app.domain.markets import InstrumentId
 from app.domain.signals import Signal, SignalAction
 from app.domain.planning.execution_constraints import ExecutionConstraints
@@ -20,6 +22,14 @@ from app.core import metrics
 from app.services.control.control_plane import control_plane
 from app.services.risk.circuit_breakers import cb_system, track_execution_failure, track_execution_latency
 from app.services.audit.audit_logger import emit, audit_context
+
+from app.services.replay.determinism_controller import DeterminismController
+from app.services.replay.replay_engine import ReplayEngine
+from app.services.replay.execution_fingerprint import ExecutionFingerprint
+from app.services.replay.replay_validator import ReplayValidator
+from app.domain.replay.execution_trace import ExecutionTrace
+from app.domain.replay.replay_seed import ReplaySeed
+from app.domain.portfolio import PortfolioSnapshot, PositionProjection, ExecutionFeedback
 
 
 REDIS_QUERY_TIMEOUT = 5.0
@@ -126,6 +136,8 @@ class ExecutionService:
     def __init__(self, db: AsyncSession, planner: Planner | None = None):
         self.db = db
         self._planner = planner or create_default_planner()
+        self._determinism = DeterminismController()
+        self._replay_validator = ReplayValidator()
 
     def _get_adapter(self, engine_type: str):
         adapter_cls = ExchangeAdapterRegistry.get(engine_type)
@@ -245,10 +257,17 @@ class ExecutionService:
             "engine_type": engine_type,
         })
         result = await self.submit_intent(intent, trace_id=trace_id)
-        await self._propagate_execution_result(result, trace_id=trace_id)
+        await self._propagate_execution_result(result, trade=None, trace_id=trace_id, intent=intent, plan=intent.transaction_plan)
         return result
 
-    async def _propagate_execution_result(self, result: ExecutionResult, trade: Trade | None = None, trace_id: str = ""):
+    async def _propagate_execution_result(
+        self,
+        result: ExecutionResult,
+        trade: Trade | None = None,
+        trace_id: str = "",
+        intent: ExecutionIntent | None = None,
+        plan: TransactionPlan | None = None,
+    ):
         execution_result_total.labels(adapter=result.adapter, status=result.status).inc()
         if result.status in ("filled", "submitted", "complete"):
             execution_result_success_total.labels(adapter=result.adapter).inc()
@@ -311,7 +330,7 @@ class ExecutionService:
             logger.debug("shadow_execution_log_skipped", error=str(e))
 
         await self._shadow_feedback_loop(result, trace_id=trace_id)
-        await self._replay_integration(result, trace_id=trace_id)
+        await self._replay_integration(result, intent, plan, trace_id=trace_id)
 
     async def _shadow_feedback_loop(self, result: ExecutionResult, trace_id: str = "") -> None:
         try:
@@ -401,11 +420,17 @@ class ExecutionService:
         })
 
         result = await self.submit_intent(intent, trace_id=trace_id)
-        await self._propagate_execution_result(result, trade, trace_id)
+        await self._propagate_execution_result(result, trade, trace_id, intent=intent, plan=intent.transaction_plan)
         return result
 
     async def submit_intent(self, intent: ExecutionIntent, trace_id: str | None = None):
         trace_id = trace_id or _next_trace_id()
+
+        # Enforce seed consistency
+        seed = self._determinism.get_seed()
+        if not intent.metadata:
+            intent.metadata = {}
+        intent.metadata["seed"] = seed.model_dump()
         engine_type = intent.instrument.venue
 
         await self._check_safety(trace_id=trace_id)
@@ -494,5 +519,87 @@ class ExecutionService:
         )
 
         result = await self.submit_intent(intent, trace_id=trace_id)
-        await self._propagate_execution_result(result, trade, trace_id)
+        await self._propagate_execution_result(result, trade, trace_id, intent=intent, plan=intent.transaction_plan)
         return result
+
+    async def _replay_integration(
+        self,
+        result: ExecutionResult,
+        intent: ExecutionIntent | None,
+        plan: TransactionPlan | None,
+        trace_id: str = "",
+    ) -> None:
+        if result.status != "filled":
+            return
+
+        try:
+            seed_data = (intent.metadata or {}).get("seed") if intent else None
+            seed = ReplaySeed(**seed_data) if seed_data else self._determinism.get_seed()
+
+            trace = self._create_execution_trace(result, intent, plan, seed)
+            fingerprint = self._generate_fingerprint(intent, plan, result, seed)
+            trace.fingerprint = fingerprint
+
+            await self._store_replay_bundle(trace, fingerprint, trace_id)
+            await self._validate_determinism(trace, result, trace_id)
+
+            replay_execution_total.inc()
+        except Exception as e:
+            logger.error("replay_integration_failed", error=str(e), trace_id=trace_id)
+
+    def _create_execution_trace(
+        self,
+        result: ExecutionResult,
+        intent: ExecutionIntent | None,
+        plan: TransactionPlan | None,
+        seed: ReplaySeed,
+    ) -> ExecutionTrace:
+        return ReplayEngine.create_trace(result, intent, plan, seed)
+
+    def _generate_fingerprint(
+        self,
+        intent: ExecutionIntent | None,
+        plan: TransactionPlan | None,
+        result: ExecutionResult,
+        seed: ReplaySeed,
+    ) -> str:
+        return ExecutionFingerprint.generate(intent, plan, result, seed)
+
+    async def _store_replay_bundle(self, trace: ExecutionTrace, fingerprint: str, trace_id: str) -> None:
+        # Currently, we emit the bundle via audit for traceability.
+        # Future: store in a dedicated replay table or Redis key.
+        await emit("execution.replay_bundle.stored", "replay", trace_id, {
+            "execution_id": trace.execution_id,
+            "fingerprint": fingerprint,
+            "trace": trace.model_dump(),
+        })
+
+    async def _validate_determinism(self, trace: ExecutionTrace, original_result: ExecutionResult, trace_id: str) -> None:
+        start = time.time()
+        replay_result = self._replay_validator.validate(trace, original_result)
+        latency_ms = (time.time() - start) * 1000
+        replay_validation_latency_ms.observe(latency_ms)
+
+        if not replay_result.match:
+            replay_determinism_failures_total.inc()
+            logger.warning(
+                "replay_determinism_mismatch",
+                trace_id=trace_id,
+                execution_id=original_result.execution_id,
+                original_fp=replay_result.fingerprint_original,
+                replay_fp=replay_result.fingerprint_replay,
+            )
+
+        if replay_result.fingerprint_original != replay_result.fingerprint_replay:
+            replay_fingerprint_mismatch_total.inc()
+            logger.warning(
+                "replay_fingerprint_mismatch",
+                trace_id=trace_id,
+                execution_id=original_result.execution_id,
+            )
+
+        await emit("execution.determinism.validated", "replay", trace_id, {
+            "execution_id": original_result.execution_id,
+            "match": replay_result.match,
+            "latency_ms": round(latency_ms, 2),
+        })
