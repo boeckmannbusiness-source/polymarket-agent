@@ -7,6 +7,7 @@ from app.domain.planning.route import Route
 from app.domain.planning.transaction_plan import TransactionPlan
 from app.domain.planning.transaction_instruction import TransactionInstruction
 from app.domain.planning.execution_constraints import ExecutionConstraints
+from app.domain.assets import AssetResolution
 from app.services.planning.quote_provider import QuoteProvider
 from app.services.planning.route_planner import RoutePlanner
 from app.services.planning.transaction_builder import TransactionBuilder
@@ -20,6 +21,9 @@ class PlaceholderQuoteProvider(QuoteProvider):
         amount_in: Decimal,
         side: str,
         constraints: ExecutionConstraints | None = None,
+        asset_resolution: AssetResolution | None = None,
+        quote_asset_resolution: AssetResolution | None = None,
+        **kwargs,
     ) -> Quote:
         max_slippage = constraints.max_slippage_bps if constraints else 100
         return Quote(

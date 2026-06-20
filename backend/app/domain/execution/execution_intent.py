@@ -1,9 +1,11 @@
 from decimal import Decimal
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 from app.domain.execution.instrument import Instrument
 
 
 class ExecutionIntent(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
     instrument: Instrument
     side: str
     quantity: Decimal

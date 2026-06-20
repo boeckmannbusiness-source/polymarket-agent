@@ -36,9 +36,23 @@ capability_registry.register("paper", VenueCapabilities(
     venue="paper",
     supports={
         VenueCapability.QUOTE,
+        VenueCapability.ROUTING,
+        VenueCapability.TRANSACTION_BUILDING,
         VenueCapability.SIMULATION,
         VenueCapability.EXECUTION,
         VenueCapability.MARKET_RESOLUTION,
+        VenueCapability.REPLAY,
+        VenueCapability.PORTFOLIO_FEEDBACK,
+    }
+))
+
+capability_registry.register("live", VenueCapabilities(
+    venue="live",
+    supports={
+        VenueCapability.QUOTE,
+        VenueCapability.ROUTING,
+        VenueCapability.TRANSACTION_BUILDING,
+        VenueCapability.EXECUTION,
     }
 ))
 
@@ -46,6 +60,8 @@ capability_registry.register("polymarket", VenueCapabilities(
     venue="polymarket",
     supports={
         VenueCapability.QUOTE,
+        VenueCapability.ROUTING,
+        VenueCapability.TRANSACTION_BUILDING,
         VenueCapability.EXECUTION,
         VenueCapability.MARKET_RESOLUTION,
         VenueCapability.REPLAY,

@@ -1,4 +1,5 @@
 from datetime import datetime, timezone
+import uuid
 from decimal import Decimal
 
 from sqlalchemy import select
@@ -6,6 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import ExchangeOrder, Fill
 from app.exchanges.base import BaseExchangeAdapter
+from app.domain.execution import ExecutionIntent, ExecutionResult
 from app.core.logging import logger
 
 
@@ -13,7 +15,15 @@ class PaperExchangeAdapter(BaseExchangeAdapter):
     def __init__(self, db: AsyncSession):
         self.db = db
 
-    async def submit_order(self, exchange_order: ExchangeOrder):
+    async def submit_order(self, exchange_order: ExchangeOrder | ExecutionIntent):
+        if isinstance(exchange_order, ExecutionIntent):
+            return ExecutionResult(
+                execution_id=str(uuid.uuid4()),
+                adapter="paper",
+                status="filled",
+                quantity_executed=exchange_order.quantity,
+                average_price=exchange_order.limit_price or Decimal("0.5"),
+            )
         trade = exchange_order.trade
 
         slippage = Decimal("0.001")
