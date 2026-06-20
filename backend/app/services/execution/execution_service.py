@@ -14,9 +14,9 @@ from app.domain.planning.transaction_plan import TransactionPlan
 from app.domain.markets import InstrumentId
 from app.domain.signals import Signal, SignalAction
 from app.domain.planning.execution_constraints import ExecutionConstraints
-from app.services.execution.translators import GenericTranslator, PolymarketTranslator
 from app.services.market_registry import MarketRegistry
 from app.services.planning import Planner, create_default_planner
+from app.services.capabilities import CapabilityResolver, CapabilityValidator
 from app.core.logging import logger
 from app.core import metrics
 from app.services.control.control_plane import control_plane
@@ -93,6 +93,20 @@ shadow_route_efficiency_histogram = metrics.Histogram(
 replay_execution_total = metrics.Counter(
     "polymarket_replay_execution_total", "Total replay executions"
 )
+
+# Sprint 1.8 venue capability metrics
+venue_capability_checks_total = metrics.Counter(
+    "venue_capability_checks_total", "Total venue capability checks", ["venue", "type"]
+)
+venue_capability_failures_total = metrics.Counter(
+    "venue_capability_failures_total", "Total venue capability validation failures", ["venue", "type"]
+)
+venue_supported_features_total = metrics.Gauge(
+    "venue_supported_features_total", "Number of supported features per venue", ["venue"]
+)
+shadow_capability_validation_total = metrics.Counter(
+    "shadow_capability_validation_total", "Total shadow capability validation events"
+)
 replay_determinism_failures_total = metrics.Counter(
     "polymarket_replay_determinism_failures_total", "Replay determinism mismatches"
 )
@@ -138,6 +152,8 @@ class ExecutionService:
         self._planner = planner or create_default_planner()
         self._determinism = DeterminismController()
         self._replay_validator = ReplayValidator()
+        self._capability_resolver = CapabilityResolver()
+        self._capability_validator = CapabilityValidator()
 
     def _get_adapter(self, engine_type: str):
         adapter_cls = ExchangeAdapterRegistry.get(engine_type)
@@ -163,6 +179,29 @@ class ExecutionService:
             names = [b.get("name") for b in active_breakers]
             await emit("EXECUTION_BLOCKED", "safety", trace_id, {"reason": f"active_breakers:{names}"})
             raise ExecutionSafetyError(f"Active circuit breakers: {names}")
+
+    async def _validate_capabilities(self, intent: ExecutionIntent, trace_id: str = "") -> None:
+        venue = intent.instrument.venue
+        capabilities = self._capability_resolver.resolve(venue)
+        report = self._capability_validator.validate_intent(intent, capabilities)
+
+        venue_capability_checks_total.labels(venue=venue, type="intent").inc()
+        venue_supported_features_total.labels(venue=venue).set(len(capabilities.supports))
+
+        await emit("shadow.capability.validation", "capability", venue, {
+            "trace_id": trace_id,
+            "venue": venue,
+            "type": "intent",
+            "is_valid": report.is_valid,
+            "missing": report.missing,
+            "supported": report.supported,
+        })
+        shadow_capability_validation_total.inc()
+
+        if not report.is_valid:
+            venue_capability_failures_total.labels(venue=venue, type="intent").inc()
+            logger.error("capability_validation_failed", venue=venue, missing=report.missing, trace_id=trace_id)
+            raise ExecutionSafetyError(f"Venue {venue} lacks required capabilities: {report.missing}")
 
     async def _kill_switch_recheck(self, trade: Trade | None = None, trace_id: str = ""):
         can_trade = await control_plane.is_trading_enabled()
@@ -432,6 +471,9 @@ class ExecutionService:
             intent.metadata = {}
         intent.metadata["seed"] = seed.model_dump()
         engine_type = intent.instrument.venue
+
+        # Validate capabilities before execution
+        await self._validate_capabilities(intent, trace_id=trace_id)
 
         await self._check_safety(trace_id=trace_id)
 
