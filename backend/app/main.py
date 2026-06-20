@@ -59,6 +59,16 @@ async def lifespan(app: FastAPI):
     global _edge_reality_engine, _overfitting_detector, _survivability_simulator, _strategy_pruning_engine, _capital_efficiency_engine
     global _walk_forward_engine, _shadow_trading_service, _stress_test_engine, _live_state_machine, _system_health_store
     setup_logging()
+
+    # Sprint 1.8A Startup Validation
+    from app.services.capabilities import validate_all
+    try:
+        validate_all()
+        logger.info("capability_validation_passed")
+    except Exception as e:
+        logger.critical("capability_validation_failed", error=str(e))
+        raise
+
     logger.info("starting_up", env=settings.APP_ENV, mode=settings.TRADING_MODE)
     try:
         await init_db()

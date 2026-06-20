@@ -1,5 +1,9 @@
-from typing import Dict
+from typing import Dict, List
 from app.domain.capabilities import VenueCapabilities, VenueCapability
+
+
+class CapabilityRegistrationError(Exception):
+    pass
 
 
 class CapabilityRegistry:
@@ -16,6 +20,12 @@ class CapabilityRegistry:
 
     def get_capabilities(self, venue: str) -> VenueCapabilities | None:
         return self._registry.get(venue)
+
+    def has(self, venue: str) -> bool:
+        return venue in self._registry
+
+    def list_venues(self) -> List[str]:
+        return list(self._registry.keys())
 
 
 # Global registry instance
