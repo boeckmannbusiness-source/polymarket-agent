@@ -333,23 +333,31 @@ class ShadowExecutionService:
         """
         Refreshes prices using the venue-neutral PriceResolver interface.
         """
-        from app.services.shadow.pricing.venue_price_resolver import VenuePriceResolver
+        from app.services.shadow.pricing.registry import PriceResolverRegistry
         from app.domain.assets import AssetId, AssetResolution, Asset, AssetMetadata
 
         open_execs = [e for e in self._executions.values() if e.status == "open"]
         if not open_execs:
             return {"updated": 0}
 
-        resolver = VenuePriceResolver()
         updated = 0
         closed = 0
 
         for exec_ in open_execs:
+            # Venue is determined by outcome/market_id context
+            # In a real scenario, ShadowExecution would store the venue explicitly.
+            # For this proof, we infer it or use a default.
+            venue = "jupiter" if len(exec_.market_id) > 40 else "polymarket"
+            resolver = PriceResolverRegistry.get(venue)
+
+            if not resolver:
+                continue
+
             # Create a mock resolution for now as we are decoupling
             # In Sprint 2.0, this will use AssetRegistry.resolve()
             asset_res = AssetResolution(
                 asset=Asset(
-                    asset_id=AssetId(venue="unknown", symbol=exec_.outcome, canonical_id=exec_.market_id),
+                    asset_id=AssetId(venue=venue, symbol=exec_.outcome or "UNKNOWN", canonical_id=exec_.market_id, quote_asset="USDC"),
                     decimals=18,
                     metadata=AssetMetadata()
                 ),
