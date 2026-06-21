@@ -14,5 +14,5 @@ class TransactionPlan(BaseModel):
     estimated_fees: int | None = None
     slippage_bps: int | None = None
     execution_deadline: datetime | None = None
-    serialized_payload: dict | None = None
+    serialized_payload_b64: str | None = None
     metadata: dict | None = None

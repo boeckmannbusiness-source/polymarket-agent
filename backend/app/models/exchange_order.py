@@ -32,7 +32,7 @@ class ExchangeOrder(Base):
 
     status: Mapped[str] = mapped_column(String(32), default="pending")
     side: Mapped[str] = mapped_column(String(8), nullable=False)
-    outcome: Mapped[str] = mapped_column(String(16), nullable=False)
+    outcome: Mapped[str | None] = mapped_column(String(16), nullable=True)
     size: Mapped[Decimal] = mapped_column(Numeric(24, 8), nullable=False)
     price: Mapped[Decimal | None] = mapped_column(Numeric(24, 8), nullable=True)
 
@@ -63,6 +63,5 @@ class ExchangeOrder(Base):
             name="ck_exchange_orders_status",
         ),
         CheckConstraint("side IN ('buy', 'sell')", name="ck_exchange_orders_side"),
-        CheckConstraint("outcome IN ('YES', 'NO')", name="ck_exchange_orders_outcome"),
         UniqueConstraint("trade_id", "order_num", name="uq_exchange_orders_trade_order"),
     )
