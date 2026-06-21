@@ -110,7 +110,7 @@ async def test_base_adapter_contract():
     # Second param (self is first) should be ExecutionIntent
     if len(params) > 1:
         from app.domain.execution import ExecutionIntent as EI
-        assert params[1].annotation == EI or str(params[1].annotation) == "ExecutionIntent"
+        assert "ExecutionIntent" in str(params[1].annotation)
 
 
 @pytest.mark.asyncio

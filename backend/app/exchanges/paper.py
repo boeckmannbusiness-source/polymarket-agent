@@ -15,7 +15,7 @@ class PaperExchangeAdapter(BaseExchangeAdapter):
     def __init__(self, db: AsyncSession):
         self.db = db
 
-    async def submit_order(self, exchange_order: ExchangeOrder | ExecutionIntent):
+    async def submit_order(self, exchange_order: ExchangeOrder | ExecutionIntent) -> ExecutionResult:
         if isinstance(exchange_order, ExecutionIntent) and not hasattr(exchange_order, "compat_trade"):
             return ExecutionResult(
                 execution_id=str(uuid.uuid4()),
@@ -83,7 +83,16 @@ class PaperExchangeAdapter(BaseExchangeAdapter):
             fee=fee,
         )
 
-        return fill
+        from app.domain.execution.execution_result import FillInfo as EFillInfo
+        return ExecutionResult(
+            execution_id=str(eo_id) if eo_id else str(uuid.uuid4()),
+            adapter="paper",
+            status="filled",
+            average_price=fill_price,
+            quantity_executed=size,
+            fees=fee,
+            fills=[EFillInfo(fill_id=str(fill.id), size=size, price=fill_price, fee=fee, timestamp=fill.filled_at)]
+        )
 
     async def cancel_order(self, order_id: str) -> dict:
         return {"status": "cancelled"}
