@@ -44,7 +44,7 @@ def test_no_venue_branching_in_core():
 def test_asset_domain_no_blockchain_imports():
     """Ensure asset domain doesn't import blockchain libraries."""
     import os
-    domain_path = "app/domain/assets/"
+    domain_path = "backend/app/domain/assets/"
     for filename in os.listdir(domain_path):
         if not filename.endswith(".py"):
             continue
