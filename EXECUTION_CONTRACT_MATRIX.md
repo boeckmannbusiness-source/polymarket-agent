@@ -8,6 +8,7 @@
 | `ExecutionService` | `Signal \| Trade` | `Result` | None | Yes | Yes | Yes | Yes |
 | `SolanaSimulationAdapter` | `Plan` | `Result` | None | No (Solana) | Yes | Yes | N/A |
 | `SolanaTransactionBuilder` | `Plan` | `Envelope` | None | No (Solana) | Yes | Yes | N/A |
+| `TransactionEnvelope` | N/A | N/A | None | No (Solana) | Yes | Yes | N/A |
 
 ### Verification Audit
 - **No outcome dependency**: Verified in `ExecutionResult`, `ExecutionIntent`, and `ExecutionTrace`.

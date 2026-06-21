@@ -1,4 +1,4 @@
-# POSTGRES_VALIDATION.md
+# SCHEMA_VALIDATION.md
 
 ### Persistence Verification (SQLite/PostgreSQL)
 - **Test Suite**: `backend/app/tests/postgres/test_persistence.py`
