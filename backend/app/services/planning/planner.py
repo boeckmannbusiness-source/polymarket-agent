@@ -3,6 +3,7 @@ from decimal import Decimal
 from app.domain.execution.instrument import Instrument
 from app.domain.planning.transaction_plan import TransactionPlan
 from app.domain.planning.execution_constraints import ExecutionConstraints
+from app.domain.assets import AssetResolution
 from app.services.planning.quote_provider import QuoteProvider
 from app.services.planning.route_planner import RoutePlanner
 from app.services.planning.transaction_builder import TransactionBuilder
@@ -30,11 +31,16 @@ class Planner:
         amount_in: Decimal,
         side: str,
         constraints: ExecutionConstraints | None = None,
+        asset_resolution: AssetResolution | None = None,
+        quote_asset_resolution: AssetResolution | None = None,
+        **kwargs,
     ) -> TransactionPlan:
         venue = instrument.venue
         capabilities = self._capability_resolver.resolve(venue)
 
-        quote = await self._quote_provider.get_quote(instrument, amount_in, side, constraints)
+        quote = await self._quote_provider.get_quote(
+            instrument, amount_in, side, constraints, asset_resolution, quote_asset_resolution
+        )
         await self._validate_quote(quote, capabilities)
 
         route = await self._route_planner.build_route(quote, constraints)

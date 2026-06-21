@@ -10,8 +10,7 @@ from app.services.planning.providers.jupiter_price_feed import JupiterPriceFeed
 from app.services.market_data.price_oracle import PriceOracle
 
 
-SOL_MINT = "So11111111111111111111111111111111111111112"
-USDC_MINT = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v"
+from app.domain.assets import AssetResolution
 
 
 class JupiterQuoteProvider(BaseQuoteProvider):
@@ -34,11 +33,16 @@ class JupiterQuoteProvider(BaseQuoteProvider):
         amount_in: Decimal,
         side: str,
         constraints: ExecutionConstraints | None = None,
+        asset_resolution: AssetResolution | None = None,
+        quote_asset_resolution: AssetResolution | None = None,
+        **kwargs,
     ) -> Quote:
         start = time.time()
         slippage = constraints.max_slippage_bps if constraints else 100
 
-        quote = await self._try_fetch_quote(instrument, amount_in, slippage)
+        quote = await self._try_fetch_quote(
+            instrument, amount_in, slippage, asset_resolution, quote_asset_resolution
+        )
 
         elapsed_ms = (time.time() - start) * 1000
 
@@ -52,9 +56,18 @@ class JupiterQuoteProvider(BaseQuoteProvider):
         instrument: Instrument,
         amount_in: Decimal,
         slippage_bps: int,
+        asset_resolution: AssetResolution | None = None,
+        quote_asset_resolution: AssetResolution | None = None,
     ) -> Quote | None:
-        input_mint = self._resolve_mint(instrument.asset_identifier)
-        output_mint = self._resolve_mint(instrument.quote_asset)
+        input_mint = None
+        output_mint = None
+
+        if asset_resolution and asset_resolution.asset:
+            input_mint = asset_resolution.asset.metadata.external_identifiers.get("mint")
+
+        if quote_asset_resolution and quote_asset_resolution.asset:
+            output_mint = quote_asset_resolution.asset.metadata.external_identifiers.get("mint")
+
         if not input_mint or not output_mint:
             return None
 
@@ -124,13 +137,3 @@ class JupiterQuoteProvider(BaseQuoteProvider):
             venue_hint=instrument.venue,
         )
 
-    @staticmethod
-    def _resolve_mint(asset: str) -> str | None:
-        lookup = {
-            "SOL": SOL_MINT,
-            "USDC": USDC_MINT,
-            "so11111111111111111111111111111111111111112": SOL_MINT,
-            "epjfwdd5aufqssqem2qn1xzybapc8g4weggkzwytdt1v": USDC_MINT,
-        }
-        key = asset.lower() if asset else ""
-        return lookup.get(key) or lookup.get(asset)

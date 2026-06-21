@@ -11,7 +11,21 @@ from app.services.execution.execution_service import ExecutionService
 from app.services.execution.fill_ingestion_service import FillIngestionService
 from app.services.execution.fill_handler import FillHandler
 from app.services.execution.reconciliation_service import ReconciliationService
+from app.services.capabilities import capability_registry
+from app.domain.capabilities import VenueCapabilities, VenueCapability
 
+
+@pytest.fixture(autouse=True)
+def setup_live_capabilities():
+    capability_registry.register("live", VenueCapabilities(
+        venue="live",
+        supports={
+            VenueCapability.QUOTE,
+            VenueCapability.ROUTING,
+            VenueCapability.TRANSACTION_BUILDING,
+            VenueCapability.EXECUTION,
+        }
+    ))
 
 
 class TestLiveOrderSubmissionIdempotent:
@@ -380,8 +394,19 @@ class TestExecutionServiceLiveRouting:
         await db_session.flush()
 
         service = ExecutionService(db_session)
+        from app.exchanges import ExchangeAdapterRegistry
+        from app.exchanges.polymarket_live import PolymarketLiveAdapter
+        from app.domain.execution import ExecutionResult
+        ExchangeAdapterRegistry.register("live", PolymarketLiveAdapter)
 
-        with patch("app.exchanges.polymarket_live.PolymarketLiveAdapter.submit_order", new=AsyncMock()) as mock_submit:
+        mock_result = ExecutionResult(
+            execution_id=str(uuid.uuid4()),
+            adapter="live",
+            status="submitted",
+            latency_ms=100.0,
+        )
+
+        with patch("app.exchanges.polymarket_live.PolymarketLiveAdapter.submit_order", new=AsyncMock(return_value=mock_result)) as mock_submit:
             with patch.object(PaperExchangeAdapter, "submit_order", new=AsyncMock()) as mock_paper:
                 with patch.object(FillHandler, "process_fill", new=AsyncMock()):
                     await service.create_trade_execution(trade)

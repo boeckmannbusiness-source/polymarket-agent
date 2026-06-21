@@ -62,8 +62,10 @@ async def lifespan(app: FastAPI):
 
     # Sprint 1.8A Startup Validation
     from app.services.capabilities import validate_all
+    from app.services.assets.bootstrap import bootstrap_asset_registry
     try:
         validate_all()
+        bootstrap_asset_registry()
         logger.info("capability_validation_passed")
     except Exception as e:
         logger.critical("capability_validation_failed", error=str(e))
