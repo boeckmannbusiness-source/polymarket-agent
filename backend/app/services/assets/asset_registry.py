@@ -10,6 +10,14 @@ class AssetRegistry:
         cls._resolvers[venue] = resolver
 
     @classmethod
+    def get_resolver(cls, venue: str) -> AssetResolver | None:
+        return cls._resolvers.get(venue)
+
+    @classmethod
+    def list_venues(cls) -> list[str]:
+        return list(cls._resolvers.keys())
+
+    @classmethod
     async def resolve(cls, asset_id: AssetId) -> AssetResolution:
         resolver = cls._resolvers.get(asset_id.venue)
         if resolver:

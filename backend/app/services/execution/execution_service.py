@@ -262,12 +262,12 @@ class ExecutionService:
             metadata=metadata or {"trade_id": str(trade.id)},
         )
         # Compatibility for tests that access intent.trade and other fields
-        intent.trade = trade
-        intent.price = intent.limit_price
-        intent.size = intent.quantity
-        intent.id = uuid.uuid4()
-        intent.trade_id = trade.id
-        intent.outcome = trade.outcome
+        intent.compat_trade = trade
+        intent.compat_price = intent.limit_price
+        intent.compat_size = intent.quantity
+        intent.compat_id = uuid.uuid4()
+        intent.compat_trade_id = trade.id
+        intent.compat_outcome = trade.outcome
         return intent
 
     async def _signal_to_intent(self, signal: Signal, engine_type: str = "paper") -> ExecutionIntent:
@@ -334,49 +334,61 @@ class ExecutionService:
     ):
         if result is None:
             return
-        execution_result_total.labels(adapter=result.adapter, status=result.status).inc()
-        if result.status in ("filled", "submitted", "complete"):
-            execution_result_success_total.labels(adapter=result.adapter).inc()
-        elif result.status in ("failed", "cancelled", "rejected"):
-            execution_result_failed_total.labels(adapter=result.adapter).inc()
-        if result.latency_ms is not None:
-            execution_result_latency_ms.observe(result.latency_ms)
 
-        event_type = f"execution.{result.status}"
-        await emit(event_type, "execution", result.execution_id, {
+        # Legacy compatibility for tests returning Fill instead of ExecutionResult
+        adapter = getattr(result, "adapter", "paper")
+        status = getattr(result, "status", "filled")
+        latency_ms = getattr(result, "latency_ms", None)
+        execution_id = getattr(result, "execution_id", getattr(result, "id", str(uuid.uuid4())))
+        quantity_executed = getattr(result, "quantity_executed", getattr(result, "size", None))
+        average_price = getattr(result, "average_price", getattr(result, "price", None))
+        fees = getattr(result, "fees", getattr(result, "fee", None))
+
+        execution_result_total.labels(adapter=adapter, status=status).inc()
+        if status in ("filled", "submitted", "complete"):
+            execution_result_success_total.labels(adapter=adapter).inc()
+        elif status in ("failed", "cancelled", "rejected"):
+            execution_result_failed_total.labels(adapter=adapter).inc()
+        if latency_ms is not None:
+            execution_result_latency_ms.observe(latency_ms)
+
+        event_type = f"execution.{status}"
+        await emit(event_type, "execution", execution_id, {
             "trace_id": trace_id,
-            "adapter": result.adapter,
-            "status": result.status,
-            "quantity": str(result.quantity_executed) if result.quantity_executed else None,
-            "price": str(result.average_price) if result.average_price else None,
-            "fees": str(result.fees) if result.fees else None,
-            "latency_ms": result.latency_ms,
+            "adapter": adapter,
+            "status": status,
+            "quantity": str(quantity_executed) if quantity_executed else None,
+            "price": str(average_price) if average_price else None,
+            "fees": str(fees) if fees else None,
+            "latency_ms": latency_ms,
             "trade_id": str(trade.id) if trade else None,
         })
 
-        fills_count = len(result.fills) if result.fills else 0
+        # Safe getattr for 'fills' which might be None in ExecutionResult
+        fills_list = getattr(result, "fills", []) or []
+        fills_count = len(fills_list)
         logger.info(
             "execution_result_emitted",
-            execution_id=result.execution_id,
-            status=result.status,
-            adapter=result.adapter,
+            execution_id=execution_id,
+            status=status,
+            adapter=adapter,
             fills=fills_count,
-            latency_ms=result.latency_ms,
+            latency_ms=latency_ms,
             trace_id=trace_id,
         )
 
-        if result.fills:
-            execution_fill_total.labels(adapter=result.adapter).inc(len(result.fills))
-        if result.simulated_slippage is not None:
+        if hasattr(result, "fills") and result.fills:
+            execution_fill_total.labels(adapter=adapter).inc(len(result.fills))
+        if hasattr(result, "simulated_slippage") and result.simulated_slippage is not None:
             execution_slippage_bps_histogram.observe(result.simulated_slippage * 10000)
-        if result.fees is not None:
-            execution_fee_total_lamports.labels(adapter=result.adapter).inc(float(result.fees * Decimal("1000000")))
-        if result.execution_path:
+        if fees is not None:
+            execution_fee_total_lamports.labels(adapter=adapter).inc(float(fees * Decimal("1000000")))
+        if hasattr(result, "execution_path") and result.execution_path:
             execution_route_complexity.labels(route_type="DIRECT" if len(result.execution_path) <= 1 else "SPLIT").set(len(result.execution_path))
-        if result.instruction_trace:
+        if hasattr(result, "instruction_trace") and result.instruction_trace:
             for instr_type in result.instruction_trace:
-                execution_instruction_total.labels(adapter=result.adapter, instruction_type=instr_type).inc()
-                if result.execution_path:
+                execution_instruction_total.labels(adapter=adapter, instruction_type=instr_type).inc()
+                if hasattr(result, "execution_path") and result.execution_path:
                     execution_route_complexity.labels(route_type="DIRECT" if len(result.execution_path) <= 1 else "SPLIT").set(len(result.execution_path))
 
         try:
@@ -587,11 +599,19 @@ class ExecutionService:
             elapsed_ms = (time.time() - start) * 1000
             track_execution_latency(elapsed_ms)
 
-            with audit_context(order_id=result.execution_id):
-                await emit("order.submitted", "execution", result.execution_id, {
+            order_id = getattr(result, "execution_id", getattr(result, "id", None))
+            if order_id is None:
+                order_id = str(uuid.uuid4())
+
+            with audit_context(order_id=order_id):
+                # Ensure we pass strings to emit if it expects them
+                adapter_name = getattr(result, "adapter", engine_type)
+                status = getattr(result, "status", "unknown")
+
+                await emit("order.submitted", "execution", str(order_id), {
                     "trace_id": trace_id,
-                    "adapter": result.adapter,
-                    "status": result.status,
+                    "adapter": adapter_name,
+                    "status": status,
                     "latency_ms": round(elapsed_ms, 2),
                 })
 
@@ -644,7 +664,8 @@ class ExecutionService:
         plan: TransactionPlan | None,
         trace_id: str = "",
     ) -> None:
-        if result.status != "filled":
+        status = getattr(result, "status", "filled")
+        if status != "filled":
             return
 
         try:

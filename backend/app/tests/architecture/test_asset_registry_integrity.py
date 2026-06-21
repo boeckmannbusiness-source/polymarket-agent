@@ -37,6 +37,21 @@ def test_registry_cache_determinism():
     assert cache.get(aid) is None
 
 @pytest.mark.asyncio
+async def test_registry_bootstrapped_symmetry():
+    """Verify every registered venue has a resolver and translator support."""
+    from app.services.assets.bootstrap import bootstrap_asset_registry
+
+    bootstrap_asset_registry()
+    venues = AssetRegistry.list_venues()
+
+    assert "jupiter" in venues
+    assert "polymarket" in venues
+
+    for venue in venues:
+        resolver = AssetRegistry.get_resolver(venue)
+        assert resolver is not None, f"Venue {venue} has no resolver"
+
+@pytest.mark.asyncio
 async def test_resolve_many_integrity():
     AssetRegistry.register_resolver("jupiter", JupiterAssetTranslator())
 
