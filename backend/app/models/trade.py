@@ -16,12 +16,16 @@ class Trade(Base):
     __tablename__ = "trades"
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    market_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("markets.id"), nullable=True)
+    market_id: Mapped[str | None] = mapped_column(String(128), nullable=True, index=True)
     signal_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("signals.id"), nullable=True)
     trade_type: Mapped[str] = mapped_column(String(16), nullable=False, default="paper")
     status: Mapped[str] = mapped_column(String(32), nullable=False, default="pending")
     side: Mapped[str] = mapped_column(String(16), nullable=False)
-    outcome: Mapped[str] = mapped_column(String(64), nullable=False)
+    outcome: Mapped[str | None] = mapped_column(String(64), nullable=True)
+
+    # ── PERSISTENCE COMPATIBILITY ──
+    compat_outcome: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    compat_condition_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
 
     order_type: Mapped[str] = mapped_column(String(16), nullable=False, default="market")
 

@@ -27,9 +27,8 @@ class Fill(Base):
         nullable=False,
         index=True,
     )
-    market_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True),
-        ForeignKey("markets.id"),
+    market_id: Mapped[str] = mapped_column(
+        String(128),
         nullable=False,
     )
     fill_num: Mapped[int] = mapped_column(Integer, nullable=False)
@@ -38,7 +37,7 @@ class Fill(Base):
     transaction_hash: Mapped[str | None] = mapped_column(String(128), nullable=True)
 
     side: Mapped[str] = mapped_column(String(8), nullable=False)
-    outcome: Mapped[str] = mapped_column(String(16), nullable=False)
+    outcome: Mapped[str | None] = mapped_column(String(16), nullable=True)
     size: Mapped[Decimal] = mapped_column(Numeric(24, 8), nullable=False)
     price: Mapped[Decimal] = mapped_column(Numeric(24, 8), nullable=False)
     fee: Mapped[Decimal] = mapped_column(Numeric(24, 8), default=Decimal("0"))
@@ -52,7 +51,6 @@ class Fill(Base):
 
     __table_args__ = (
         CheckConstraint("side IN ('buy', 'sell')", name="ck_fills_side"),
-        CheckConstraint("outcome IN ('YES', 'NO')", name="ck_fills_outcome"),
         UniqueConstraint("exchange_order_id", "fill_num", name="uq_fills_exchange_order_fill"),
         Index("ix_fills_market_id", "market_id"),
         Index("ix_fills_filled_at", "filled_at"),
