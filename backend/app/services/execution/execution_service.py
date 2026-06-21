@@ -240,35 +240,15 @@ class ExecutionService:
     def _build_intent(self, trade: Trade, engine_type: str, side: str | None = None,
                       quantity: Decimal | None = None, limit_price: Decimal | None = None,
                       metadata: dict | None = None) -> ExecutionIntent:
-        # Backward compatibility for tests/models that don't have asset_in/out
-        asset_in = getattr(trade, "asset_in", str(trade.market_id) if trade.market_id else "")
-        asset_out = getattr(trade, "asset_out", "USDC")
-
-        instrument = Instrument(
-            venue=engine_type,
-            symbol=str(trade.market_id) if trade.market_id else "",
-            asset_identifier=asset_in,
-            quote_asset=asset_out,
-            metadata={"outcome": trade.outcome} if trade.outcome else None,
+        from app.services.execution.intent_factory import ExecutionIntentFactory
+        return ExecutionIntentFactory.create_from_trade(
+            trade=trade,
+            engine_type=engine_type,
+            side=side,
+            quantity=quantity,
+            limit_price=limit_price,
+            metadata=metadata
         )
-        intent = ExecutionIntent(
-            instrument=instrument,
-            side=side or trade.side,
-            quantity=quantity or Decimal(str(trade.size)),
-            order_type=trade.order_type or "market",
-            limit_price=limit_price or (Decimal(str(trade.price)) if trade.price is not None else None),
-            slippage_bps=None,
-            strategy_id=str(trade.agent_id) if trade.agent_id else None,
-            metadata=metadata or {"trade_id": str(trade.id)},
-        )
-        # Compatibility for tests that access intent.trade and other fields
-        intent.compat_trade = trade
-        intent.compat_price = intent.limit_price
-        intent.compat_size = intent.quantity
-        intent.compat_id = uuid.uuid4()
-        intent.compat_trade_id = trade.id
-        intent.compat_outcome = trade.outcome
-        return intent
 
     async def _signal_to_intent(self, signal: Signal, engine_type: str = "paper") -> ExecutionIntent:
         action_to_side = {

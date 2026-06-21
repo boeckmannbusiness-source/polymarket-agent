@@ -119,6 +119,11 @@ class ShadowExecutionService:
     async def update_current_price(
         self, execution_id: str, current_price: float
     ) -> ShadowExecution | None:
+        """
+        Updates the current price and recalculates unrealized PnL.
+        NOTE: This method is being refactored to use PriceResolver in Sprint 2.0.
+        Current implementation maintains float compatibility for the existing shadow layer.
+        """
         from app.services.shadow.pnl_utils import compute_shadow_pnl
         r = await self._safe_redis()
         if not r:
@@ -233,13 +238,20 @@ class ShadowExecutionService:
         return None
 
     async def process_signal(self, signal: dict[str, Any]) -> ShadowExecution | None:
-        entry_price = signal.get("estimated_probability") or signal.get("implied_probability") or 0.5
+        """
+        Processes a signal into a shadow execution without binary assumptions.
+        """
+        # Venue-neutral price resolution from signal
+        entry_price = signal.get("price") or signal.get("estimated_probability") or signal.get("implied_probability") or 0.0
         entry_price = float(entry_price)
+
         confidence = float(signal.get("confidence", 0.5))
         base_size = 100.0
         size = base_size * confidence
         direction = signal.get("direction", "buy")
-        outcome = signal.get("outcome", "YES" if direction == "buy" else "NO")
+
+        # Outcome is now optional and venue-neutral
+        outcome = signal.get("outcome")
         strategy = signal.get("source_agent") or signal.get("signal_type") or "unknown"
 
         return await self.create_execution(
@@ -247,7 +259,7 @@ class ShadowExecutionService:
             market_id=str(signal["market_id"]),
             strategy=strategy,
             direction=direction,
-            outcome=outcome,
+            outcome=outcome or "NONE",
             size=size,
             entry_price=entry_price,
             signal_confidence=confidence,
@@ -318,58 +330,36 @@ class ShadowExecutionService:
         return {"created": created, "skipped": skipped, "total_signals": len(signals)}
 
     async def refresh_prices(self, db: AsyncSession) -> dict[str, Any]:
+        """
+        Refreshes prices using the venue-neutral PriceResolver interface.
+        """
+        from app.services.shadow.pricing.venue_price_resolver import VenuePriceResolver
+        from app.domain.assets import AssetId, AssetResolution, Asset, AssetMetadata
+
         open_execs = [e for e in self._executions.values() if e.status == "open"]
         if not open_execs:
             return {"updated": 0}
 
-        market_ids_raw = list(set(e.market_id for e in open_execs if e.market_id))
-        if not market_ids_raw:
-            return {"updated": 0}
-
-        from uuid import UUID
-        market_uuids = []
-        for mid in market_ids_raw:
-            try:
-                market_uuids.append(UUID(mid))
-            except (ValueError, TypeError):
-                continue
-
-        if not market_uuids:
-            return {"updated": 0}
-
-        result = await db.execute(
-            select(Market).where(Market.id.in_(market_uuids))
-        )
-        markets = list(result.scalars().all())
-        market_prices: dict[str, float] = {}
-        resolved_markets: dict[str, bool] = {}
-        resolution_prices: dict[str, float] = {}
-
-        for m in markets:
-            mid = str(m.id)
-            if m.outcomes:
-                if isinstance(m.outcomes, dict):
-                    yes_price = m.outcomes.get("YES") or m.outcomes.get("yes")
-                    if yes_price:
-                        market_prices[mid] = float(yes_price)
-                    elif "prices" in m.outcomes:
-                        prices = m.outcomes["prices"]
-                        if prices and len(prices) > 0:
-                            market_prices[mid] = float(prices[0])
-            if m.resolved:
-                resolved_markets[mid] = True
-                resolution_prices[mid] = 1.0 if m.resolution and m.resolution.upper() == "YES" else 0.0
-
+        resolver = VenuePriceResolver()
         updated = 0
         closed = 0
+
         for exec_ in open_execs:
-            mid = exec_.market_id
-            if mid in resolved_markets and mid in resolution_prices:
-                await self.close_execution(exec_.id, resolution_prices[mid])
-                closed += 1
-                updated += 1
-            elif mid in market_prices:
-                await self.update_current_price(exec_.id, market_prices[mid])
+            # Create a mock resolution for now as we are decoupling
+            # In Sprint 2.0, this will use AssetRegistry.resolve()
+            asset_res = AssetResolution(
+                asset=Asset(
+                    asset_id=AssetId(venue="unknown", symbol=exec_.outcome, canonical_id=exec_.market_id),
+                    decimals=18,
+                    metadata=AssetMetadata()
+                ),
+                source="shadow",
+                confidence=1.0
+            )
+
+            price = await resolver.resolve_price(asset_res)
+            if price is not None:
+                await self.update_current_price(exec_.id, float(price))
                 updated += 1
 
         return {"updated": updated, "closed": closed}
