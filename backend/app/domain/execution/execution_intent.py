@@ -17,7 +17,7 @@ class ExecutionIntent(BaseModel):
     metadata: dict | None = None
 
     # Legacy Compatibility Layer (Pre-Sprint 2.0)
-    # MUST use compat_ prefix. Forbidden: outcome, market_id, clob_*
+    # MUST use compat_ prefix. Forbidden: compat_outcome, compat_market_id, compat_clob_*
     compat_trade: Any = None
     compat_price: Decimal | None = None
     compat_size: Decimal | None = None

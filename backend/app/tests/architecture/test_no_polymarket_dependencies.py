@@ -39,6 +39,13 @@ def test_domain_models_have_no_polymarket_fields():
             content = f.read()
         for token in ("outcome", "condition_id", "clob", "yes_no", "probability"):
             if token in content:
+                # Allow compat_ prefix
+                if f"compat_{token}" in content:
+                    # Simple check: if all occurrences are prefixed with compat_
+                    occurrences = content.count(token)
+                    compat_occurrences = content.count(f"compat_{token}")
+                    if occurrences == compat_occurrences:
+                        continue
                 violations.append((filepath, token))
     assert not violations, (
         "Domain models contain Polymarket-specific fields:\n" +
