@@ -1,6 +1,7 @@
 import asyncio
 import time
 import uuid
+from datetime import datetime, timezone
 from typing import Any
 from decimal import Decimal
 
@@ -10,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models import Trade, ExchangeOrder
 from app.exchanges import ExchangeAdapterRegistry
 from app.domain.execution import ExecutionIntent, ExecutionResult, Instrument
+from app.domain.execution.execution_mode import ExecutionMode
 from app.domain.planning.transaction_plan import TransactionPlan
 from app.domain.markets import InstrumentId
 from app.domain.signals import Signal, SignalAction
@@ -149,6 +151,40 @@ class ExecutionSafetyError(Exception):
 
 
 class ExecutionService:
+    def _intent_to_order(self, intent: ExecutionIntent) -> ExchangeOrder:
+        """Converts an ExecutionIntent to a persisted ExchangeOrder."""
+        trade_id = None
+        if intent.metadata and "trade_id" in intent.metadata:
+            trade_id = intent.metadata["trade_id"]
+        elif intent.compat_trade:
+            trade_id = str(intent.compat_trade.id)
+
+        if not trade_id:
+            raise ValueError("ExecutionIntent must have a trade_id in metadata or compat_trade")
+
+        idempotency_key = (intent.metadata or {}).get("idempotency_key")
+        if not idempotency_key:
+            idempotency_key = f"exec_{trade_id}_{int(time.time())}"
+
+        order = ExchangeOrder(
+            id=uuid.uuid4(),
+            trade_id=uuid.UUID(trade_id),
+            engine_type=intent.instrument.venue,
+            exchange=intent.instrument.venue,
+            status="pending",
+            side=intent.side,
+            outcome=intent.compat_outcome,
+            size=intent.quantity,
+            price=intent.limit_price,
+            idempotency_key=idempotency_key,
+            raw_request={
+                "intent": intent.model_dump(mode="json"),
+                "plan": intent.transaction_plan.model_dump(mode="json") if intent.transaction_plan else None
+            },
+            created_at=datetime.now(timezone.utc)
+        )
+        return order
+
     def __init__(self, db: AsyncSession, planner: Planner | None = None):
         self.db = db
         self._planner = planner or create_default_planner()
@@ -164,6 +200,18 @@ class ExecutionService:
         return adapter_cls(self.db)
 
     async def _check_safety(self, trade: Trade | None = None, trace_id: str = ""):
+        from app.config import settings
+        mode = ExecutionMode(settings.EXECUTION_MODE)
+
+        if mode == ExecutionMode.DISABLED:
+            await emit("EXECUTION_BLOCKED", "safety", trace_id, {"reason": "execution_mode_disabled"})
+            raise ExecutionSafetyError("Execution mode is DISABLED")
+
+        if mode == ExecutionMode.LIVE and not settings.STRICT_LIVE_ENABLED:
+            logger.critical("LIVE_EXECUTION_ATTEMPT_WITHOUT_STRICT_ENABLE", trace_id=trace_id)
+            await emit("EXECUTION_BLOCKED", "safety", trace_id, {"reason": "live_not_explicitly_enabled"})
+            raise ExecutionSafetyError("LIVE mode requires STRICT_LIVE_ENABLED=True")
+
         if not await control_plane.is_trading_enabled():
             await emit("EXECUTION_BLOCKED", "safety", trace_id, {"reason": "global_trading_disabled"})
             raise ExecutionSafetyError("Global trading disabled by control plane")
@@ -512,8 +560,6 @@ class ExecutionService:
         return result
 
     async def submit_order(self, order: ExchangeOrder):
-        # Legacy compatibility for tests
-
         # Resolve order.status early for idempotency tests
         if order.status == "submitted":
             return None
@@ -547,9 +593,15 @@ class ExecutionService:
         async with lock:
             await self._kill_switch_recheck(trace_id=trace_id)
             adapter = self._get_adapter(engine_type)
+
+            # Convert intent to order
+            order = self._intent_to_order(intent)
+            self.db.add(order)
+            await self.db.flush()
+
             start = time.time()
             try:
-                result = await asyncio.wait_for(adapter.submit_order(intent), timeout=ADAPTER_TIMEOUT)
+                result = await asyncio.wait_for(adapter.submit_order(order), timeout=ADAPTER_TIMEOUT)
             except asyncio.TimeoutError:
                 elapsed_ms = (time.time() - start) * 1000
                 track_execution_failure()

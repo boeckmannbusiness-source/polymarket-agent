@@ -1,10 +1,8 @@
-from typing import Union
 from app.models import ExchangeOrder
-from app.domain.execution import ExecutionIntent
 
 
 class BaseExchangeAdapter:
-    async def submit_order(self, order: Union[ExchangeOrder, ExecutionIntent]):
+    async def submit_order(self, order: ExchangeOrder):
         raise NotImplementedError
 
     async def cancel_order(self, order_id: str) -> dict:
