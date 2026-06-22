@@ -7,7 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import ExchangeOrder, Fill
 from app.exchanges.base import BaseExchangeAdapter
-from app.domain.execution import ExecutionIntent, ExecutionResult
+from app.domain.execution import ExecutionResult
 from app.core.logging import logger
 
 
@@ -15,26 +15,16 @@ class PaperExchangeAdapter(BaseExchangeAdapter):
     def __init__(self, db: AsyncSession):
         self.db = db
 
-    async def submit_order(self, exchange_order: ExchangeOrder | ExecutionIntent) -> ExecutionResult:
-        if isinstance(exchange_order, ExecutionIntent) and not hasattr(exchange_order, "compat_trade"):
-            return ExecutionResult(
-                execution_id=str(uuid.uuid4()),
-                adapter="paper",
-                status="filled",
-                quantity_executed=exchange_order.quantity,
-                average_price=exchange_order.limit_price or Decimal("0.5"),
-            )
-
-        # Legacy compatibility mapping
-        trade = getattr(exchange_order, "compat_trade", getattr(exchange_order, "trade", None))
-        base_price = getattr(exchange_order, "compat_price", getattr(exchange_order, "price", None))
+    async def submit_order(self, exchange_order: ExchangeOrder) -> ExecutionResult:
+        trade = exchange_order.trade
+        base_price = exchange_order.price
         if base_price is None:
             base_price = Decimal("0.5")
 
-        size = getattr(exchange_order, "compat_size", getattr(exchange_order, "size", Decimal("0")))
-        eo_id = getattr(exchange_order, "compat_id", getattr(exchange_order, "id", None))
-        eo_trade_id = getattr(exchange_order, "compat_trade_id", getattr(exchange_order, "trade_id", None))
-        eo_outcome = getattr(exchange_order, "compat_outcome", getattr(exchange_order, "outcome", None))
+        size = exchange_order.size
+        eo_id = exchange_order.id
+        eo_trade_id = exchange_order.trade_id
+        eo_outcome = exchange_order.outcome
 
         slippage = Decimal("0.001")
         if exchange_order.side == "buy":
@@ -44,9 +34,8 @@ class PaperExchangeAdapter(BaseExchangeAdapter):
 
         fee = size * Decimal("0.001")
 
-        if not isinstance(exchange_order, ExecutionIntent):
-            exchange_order.status = "filled"
-            exchange_order.filled_size = size
+        exchange_order.status = "filled"
+        exchange_order.filled_size = size
         exchange_order.filled_price = fill_price
         exchange_order.fee = fee
         exchange_order.slippage = slippage

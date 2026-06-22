@@ -105,12 +105,12 @@ async def test_base_adapter_contract():
 
     sig = inspect.signature(BaseExchangeAdapter.submit_order)
     params = list(sig.parameters.values())
-    # Should accept ExecutionIntent
+    # Should accept ExchangeOrder
     param_types = [p.annotation for p in params]
-    # Second param (self is first) should be ExecutionIntent
+    # Second param (self is first) should be ExchangeOrder
     if len(params) > 1:
-        from app.domain.execution import ExecutionIntent as EI
-        assert "ExecutionIntent" in str(params[1].annotation)
+        from app.models import ExchangeOrder
+        assert "ExchangeOrder" in str(params[1].annotation)
 
 
 @pytest.mark.asyncio
