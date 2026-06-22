@@ -1,8 +1,10 @@
 import base64
 import json
+from typing import Optional
 from datetime import datetime, timezone
 from app.domain.planning.transaction_plan import TransactionPlan
 from app.domain.solana.models import TransactionEnvelope, TransactionPayload
+from app.services.execution.governance.execution_governor import ExecutionGovernor
 
 
 class SolanaTransactionBuilder:
@@ -10,8 +12,12 @@ class SolanaTransactionBuilder:
 
     Deterministic and pure (no signing, no RPC).
     """
+    def __init__(self, governor: Optional[ExecutionGovernor] = None):
+        self._governor = governor
 
     async def build_envelope(self, plan: TransactionPlan) -> TransactionEnvelope:
+        if self._governor:
+            self._governor.authorize_execution()
         # Create a deterministic payload for simulation
 
         payload_data = {

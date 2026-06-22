@@ -5,6 +5,7 @@ from app.domain.planning.transaction_plan import TransactionPlan
 from app.domain.solana.models import TransactionReceipt
 from app.domain.execution import ExecutionResult, FillInfo
 from app.services.execution.transaction_builder.solana_builder import SolanaTransactionBuilder
+from app.services.execution.governance.execution_governor import ExecutionGovernor
 
 
 class SolanaSimulationAdapter:
@@ -13,10 +14,13 @@ class SolanaSimulationAdapter:
     NO BROADCAST. Simulation only.
     """
 
-    def __init__(self, transaction_builder: SolanaTransactionBuilder | None = None):
-        self._builder = transaction_builder or SolanaTransactionBuilder()
+    def __init__(self, transaction_builder: SolanaTransactionBuilder | None = None, governor: ExecutionGovernor | None = None):
+        self._builder = transaction_builder or SolanaTransactionBuilder(governor=governor)
+        self._governor = governor
 
     async def simulate_execution(self, plan: TransactionPlan) -> TransactionReceipt:
+        if self._governor:
+            self._governor.authorize_simulate()
         # 1. Build the transaction envelope
         envelope = await self._builder.build_envelope(plan)
 

@@ -31,6 +31,7 @@ from app.services.replay.determinism_controller import DeterminismController
 from app.services.replay.replay_engine import ReplayEngine
 from app.services.replay.execution_fingerprint import ExecutionFingerprint
 from app.services.replay.replay_validator import ReplayValidator
+from app.services.execution.governance.execution_governor import ExecutionGovernor
 from app.domain.replay.execution_trace import ExecutionTrace
 from app.domain.replay.replay_seed import ReplaySeed
 from app.domain.portfolio import PortfolioSnapshot, PositionProjection, ExecutionFeedback
@@ -185,9 +186,11 @@ class ExecutionService:
         )
         return order
 
-    def __init__(self, db: AsyncSession, planner: Planner | None = None):
+    def __init__(self, db: AsyncSession, planner: Planner | None = None, governor: ExecutionGovernor | None = None):
         self.db = db
         self._planner = planner or create_default_planner()
+        from app.config import settings
+        self._governor = governor or ExecutionGovernor(ExecutionMode(settings.EXECUTION_MODE))
         self._determinism = DeterminismController()
         self._replay_validator = ReplayValidator()
         self._capability_resolver = CapabilityResolver()
@@ -203,9 +206,8 @@ class ExecutionService:
         from app.config import settings
         mode = ExecutionMode(settings.EXECUTION_MODE)
 
-        if mode == ExecutionMode.DISABLED:
-            await emit("EXECUTION_BLOCKED", "safety", trace_id, {"reason": "execution_mode_disabled"})
-            raise ExecutionSafetyError("Execution mode is DISABLED")
+        # Enforce governance
+        self._governor.authorize_execution({"trace_id": trace_id})
 
         if mode == ExecutionMode.LIVE and not settings.STRICT_LIVE_ENABLED:
             logger.critical("LIVE_EXECUTION_ATTEMPT_WITHOUT_STRICT_ENABLE", trace_id=trace_id)
@@ -349,7 +351,9 @@ class ExecutionService:
             "engine_type": engine_type,
         })
         result = await self.submit_intent(intent, trace_id=trace_id)
-        await self._propagate_execution_result(result, trade=None, trace_id=trace_id, intent=intent, plan=intent.transaction_plan)
+        # Capture authorization from governor for replay
+        auth = self._governor.authorize(ExecutionPermission.BUILD, {"trace_id": trace_id})
+        await self._propagate_execution_result(result, trade=None, trace_id=trace_id, intent=intent, plan=intent.transaction_plan, authorization=auth)
         return result
 
     async def _propagate_execution_result(
@@ -359,6 +363,7 @@ class ExecutionService:
         trace_id: str = "",
         intent: ExecutionIntent | None = None,
         plan: TransactionPlan | None = None,
+        authorization: Any | None = None,
     ):
         if result is None:
             return
@@ -436,7 +441,7 @@ class ExecutionService:
             logger.debug("shadow_execution_log_skipped", error=str(e))
 
         await self._shadow_feedback_loop(result, trace_id=trace_id)
-        await self._replay_integration(result, intent, plan, trace_id=trace_id)
+        await self._replay_integration(result, intent, plan, trace_id=trace_id, authorization=authorization)
 
     async def _shadow_feedback_loop(self, result: ExecutionResult, trace_id: str = "") -> None:
         try:
@@ -556,7 +561,8 @@ class ExecutionService:
         intent.transaction_plan = plan
 
         result = await self.submit_intent(intent, trace_id=trace_id)
-        await self._propagate_execution_result(result, trade, trace_id, intent=intent, plan=intent.transaction_plan)
+        auth = self._governor.authorize(ExecutionPermission.BUILD, {"trace_id": trace_id})
+        await self._propagate_execution_result(result, trade, trace_id, intent=intent, plan=intent.transaction_plan, authorization=auth)
         return result
 
     async def submit_order(self, order: ExchangeOrder):
@@ -686,7 +692,8 @@ class ExecutionService:
         )
 
         result = await self.submit_intent(intent, trace_id=trace_id)
-        await self._propagate_execution_result(result, trade, trace_id, intent=intent, plan=intent.transaction_plan)
+        auth = self._governor.authorize(ExecutionPermission.BUILD, {"trace_id": trace_id})
+        await self._propagate_execution_result(result, trade, trace_id, intent=intent, plan=intent.transaction_plan, authorization=auth)
         return result
 
     async def _replay_integration(
@@ -695,6 +702,7 @@ class ExecutionService:
         intent: ExecutionIntent | None,
         plan: TransactionPlan | None,
         trace_id: str = "",
+        authorization: Any | None = None,
     ) -> None:
         status = getattr(result, "status", "filled")
         if status != "filled":
@@ -704,7 +712,19 @@ class ExecutionService:
             seed_data = (intent.metadata or {}).get("seed") if intent else None
             seed = ReplaySeed(**seed_data) if seed_data else self._determinism.get_seed()
 
-            trace = self._create_execution_trace(result, intent, plan, seed)
+            auth_snapshot = None
+            if authorization:
+                from app.domain.replay.execution_snapshot import ExecutionAuthorizationSnapshot
+                auth_snapshot = ExecutionAuthorizationSnapshot(
+                    decision=authorization.decision,
+                    mode=authorization.mode,
+                    granted_permissions=authorization.granted_permissions,
+                    reason=authorization.reason,
+                    timestamp=authorization.timestamp,
+                    fingerprint=authorization.fingerprint,
+                )
+
+            trace = self._create_execution_trace(result, intent, plan, seed, auth_snapshot)
             fingerprint = self._generate_fingerprint(intent, plan, result, seed)
             trace.fingerprint = fingerprint
 
@@ -721,8 +741,9 @@ class ExecutionService:
         intent: ExecutionIntent | None,
         plan: TransactionPlan | None,
         seed: ReplaySeed,
+        authorization: Any | None = None,
     ) -> ExecutionTrace:
-        return ReplayEngine.create_trace(result, intent, plan, seed)
+        return ReplayEngine.create_trace(result, intent, plan, seed, authorization)
 
     def _generate_fingerprint(
         self,

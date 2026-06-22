@@ -5,6 +5,7 @@ from uuid import uuid4
 from app.domain.execution import ExecutionResult, FillInfo
 from app.domain.replay.execution_trace import ExecutionTrace
 from app.domain.replay.replay_seed import ReplaySeed
+from app.domain.replay.execution_snapshot import ExecutionAuthorizationSnapshot
 from app.services.replay.execution_fingerprint import ExecutionFingerprint
 
 
@@ -75,6 +76,7 @@ class ReplayEngine:
         intent: object,
         plan: object,
         seed: ReplaySeed,
+        authorization: ExecutionAuthorizationSnapshot | None = None,
     ) -> ExecutionTrace:
         fill_prices = [f.price for f in (result.fills or [])]
         fill_sizes = [f.size for f in (result.fills or [])]
@@ -98,6 +100,7 @@ class ReplayEngine:
             average_price=result.average_price or Decimal("0"),
             quantity_executed=result.quantity_executed or Decimal("0"),
             latency_ms=result.latency_ms or 0.0,
+            authorization=authorization,
         )
 
         trace.fingerprint = ExecutionFingerprint.generate(intent, plan, result, seed)
