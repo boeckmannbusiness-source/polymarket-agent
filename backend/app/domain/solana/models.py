@@ -35,6 +35,24 @@ class TransactionEnvelope(BaseModel):
         return hashlib.sha256(raw.encode()).hexdigest()
 
 
+class SimulationReceipt(BaseModel):
+    """A real receipt from on-chain simulation."""
+    success: bool
+    compute_units: int
+    estimated_fee: int
+    logs: List[str]
+    slot: int
+    blockhash: str
+    metadata: Optional[dict] = Field(default_factory=dict)
+
+
+class SimulationSnapshot(BaseModel):
+    """Snapshot of a simulation for replay preservation."""
+    receipt: SimulationReceipt
+    timestamp: float
+    rpc_endpoint: str
+
+
 class TransactionReceipt(BaseModel):
     """A synthetic receipt from simulation."""
     transaction_hash: str  # synthetic for simulation
@@ -42,4 +60,5 @@ class TransactionReceipt(BaseModel):
     estimated_fees: int
     compute_units: int
     execution_trace: Optional[List[str]] = None
+    simulation_snapshot: Optional[SimulationSnapshot] = None
     metadata: Optional[dict] = Field(default_factory=dict)

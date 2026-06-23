@@ -46,6 +46,14 @@ class ReplayEngine:
                 timestamp=fill_timestamp,
             ))
 
+        metadata = {
+            "replayed": True,
+            "original_execution_id": trace.execution_id,
+            "seed": trace.seed.seed,
+        }
+        if trace.simulation:
+            metadata["simulation"] = trace.simulation.model_dump()
+
         return ExecutionResult(
             execution_id=execution_id,
             adapter=trace.plan.quote.source if trace.plan.quote and trace.plan.quote.source and trace.plan.quote.source != "jupiter_simulated" else "jupiter_simulated",
@@ -63,11 +71,7 @@ class ReplayEngine:
             simulated_slippage=float(trace.plan.slippage_bps or 0) / 10000.0,
             simulated_latency_ms=trace.latency_ms,
             instruction_trace=trace.instruction_trace_snapshot or [],
-            metadata={
-                "replayed": True,
-                "original_execution_id": trace.execution_id,
-                "seed": trace.seed.seed,
-            },
+            metadata=metadata,
         )
 
     @staticmethod
@@ -77,6 +81,7 @@ class ReplayEngine:
         plan: object,
         seed: ReplaySeed,
         authorization: ExecutionAuthorizationSnapshot | None = None,
+        simulation: object | None = None,
     ) -> ExecutionTrace:
         fill_prices = [f.price for f in (result.fills or [])]
         fill_sizes = [f.size for f in (result.fills or [])]
@@ -101,6 +106,7 @@ class ReplayEngine:
             quantity_executed=result.quantity_executed or Decimal("0"),
             latency_ms=result.latency_ms or 0.0,
             authorization=authorization,
+            simulation=simulation,
         )
 
         trace.fingerprint = ExecutionFingerprint.generate(intent, plan, result, seed)
