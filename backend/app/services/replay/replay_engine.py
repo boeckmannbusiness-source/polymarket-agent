@@ -1,3 +1,7 @@
+from app.domain.solana.models import SimulationSnapshot, SimulationInvalidationError, SimulationInvalidationReason
+from app.domain.capabilities.capability_snapshot import CapabilitySnapshot
+from app.domain.planning.transaction_plan import TransactionPlan
+from app.domain.execution.execution_intent import ExecutionIntent
 from decimal import Decimal
 from datetime import datetime, timezone
 from uuid import uuid4
@@ -7,11 +11,26 @@ from app.domain.replay.execution_trace import ExecutionTrace
 from app.domain.replay.replay_seed import ReplaySeed
 from app.domain.replay.execution_snapshot import ExecutionAuthorizationSnapshot
 from app.services.replay.execution_fingerprint import ExecutionFingerprint
+from app.services.replay.offline_guard import ReplayOfflineGuard
 
 
 class ReplayEngine:
     @staticmethod
     def replay(trace: ExecutionTrace) -> ExecutionResult:
+        with ReplayOfflineGuard.enforce():
+            return ReplayEngine._replay_internal(trace)
+
+    @staticmethod
+    def _replay_internal(trace: ExecutionTrace) -> ExecutionResult:
+        if trace.simulation and trace.simulation.receipt:
+            receipt = trace.simulation.receipt
+            recomputed = receipt.calculate_hash(trace.plan.serialized_payload_b64)
+            if receipt.hash and receipt.hash != recomputed:
+                raise SimulationInvalidationError(
+                    SimulationInvalidationReason.HASH_MISMATCH,
+                    f"Simulation hash mismatch: {receipt.hash} != {recomputed}"
+                )
+
         if trace.seed:
             import hashlib
             import uuid
@@ -46,6 +65,14 @@ class ReplayEngine:
                 timestamp=fill_timestamp,
             ))
 
+        metadata = {
+            "replayed": True,
+            "original_execution_id": trace.execution_id,
+            "seed": trace.seed.seed,
+        }
+        if trace.simulation:
+            metadata["simulation"] = trace.simulation.model_dump()
+
         return ExecutionResult(
             execution_id=execution_id,
             adapter=trace.plan.quote.source if trace.plan.quote and trace.plan.quote.source and trace.plan.quote.source != "jupiter_simulated" else "jupiter_simulated",
@@ -63,20 +90,18 @@ class ReplayEngine:
             simulated_slippage=float(trace.plan.slippage_bps or 0) / 10000.0,
             simulated_latency_ms=trace.latency_ms,
             instruction_trace=trace.instruction_trace_snapshot or [],
-            metadata={
-                "replayed": True,
-                "original_execution_id": trace.execution_id,
-                "seed": trace.seed.seed,
-            },
+            metadata=metadata,
         )
 
     @staticmethod
     def create_trace(
         result: ExecutionResult,
-        intent: object,
-        plan: object,
+        intent: ExecutionIntent,
+        plan: TransactionPlan,
         seed: ReplaySeed,
         authorization: ExecutionAuthorizationSnapshot | None = None,
+        simulation: SimulationSnapshot | None = None,
+        capability: CapabilitySnapshot | None = None,
     ) -> ExecutionTrace:
         fill_prices = [f.price for f in (result.fills or [])]
         fill_sizes = [f.size for f in (result.fills or [])]
@@ -101,6 +126,8 @@ class ReplayEngine:
             quantity_executed=result.quantity_executed or Decimal("0"),
             latency_ms=result.latency_ms or 0.0,
             authorization=authorization,
+            simulation=simulation,
+            capability=capability,
         )
 
         trace.fingerprint = ExecutionFingerprint.generate(intent, plan, result, seed)
