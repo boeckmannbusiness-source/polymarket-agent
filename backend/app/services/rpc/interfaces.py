@@ -31,12 +31,12 @@ class RpcReader(ABC):
     async def get_account_info(self, address: str) -> Optional[dict]:
         ...
 
-
-class RpcWriter(ABC):
     @abstractmethod
     async def simulate_transaction(self, transaction_b64: str) -> dict:
         ...
 
+
+class RpcWriter(ABC):
     @abstractmethod
     async def send_transaction(self, transaction_b64: str) -> str:
         ...

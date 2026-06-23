@@ -1,3 +1,7 @@
+from app.domain.solana.models import SimulationSnapshot, SimulationInvalidationError, SimulationInvalidationReason
+from app.domain.capabilities.capability_snapshot import CapabilitySnapshot
+from app.domain.planning.transaction_plan import TransactionPlan
+from app.domain.execution.execution_intent import ExecutionIntent
 from decimal import Decimal
 from datetime import datetime, timezone
 from uuid import uuid4
@@ -7,11 +11,26 @@ from app.domain.replay.execution_trace import ExecutionTrace
 from app.domain.replay.replay_seed import ReplaySeed
 from app.domain.replay.execution_snapshot import ExecutionAuthorizationSnapshot
 from app.services.replay.execution_fingerprint import ExecutionFingerprint
+from app.services.replay.offline_guard import ReplayOfflineGuard
 
 
 class ReplayEngine:
     @staticmethod
     def replay(trace: ExecutionTrace) -> ExecutionResult:
+        with ReplayOfflineGuard.enforce():
+            return ReplayEngine._replay_internal(trace)
+
+    @staticmethod
+    def _replay_internal(trace: ExecutionTrace) -> ExecutionResult:
+        if trace.simulation and trace.simulation.receipt:
+            receipt = trace.simulation.receipt
+            recomputed = receipt.calculate_hash(trace.plan.serialized_payload_b64)
+            if receipt.hash and receipt.hash != recomputed:
+                raise SimulationInvalidationError(
+                    SimulationInvalidationReason.HASH_MISMATCH,
+                    f"Simulation hash mismatch: {receipt.hash} != {recomputed}"
+                )
+
         if trace.seed:
             import hashlib
             import uuid
@@ -77,11 +96,12 @@ class ReplayEngine:
     @staticmethod
     def create_trace(
         result: ExecutionResult,
-        intent: object,
-        plan: object,
+        intent: ExecutionIntent,
+        plan: TransactionPlan,
         seed: ReplaySeed,
         authorization: ExecutionAuthorizationSnapshot | None = None,
-        simulation: object | None = None,
+        simulation: SimulationSnapshot | None = None,
+        capability: CapabilitySnapshot | None = None,
     ) -> ExecutionTrace:
         fill_prices = [f.price for f in (result.fills or [])]
         fill_sizes = [f.size for f in (result.fills or [])]
@@ -107,6 +127,7 @@ class ReplayEngine:
             latency_ms=result.latency_ms or 0.0,
             authorization=authorization,
             simulation=simulation,
+            capability=capability,
         )
 
         trace.fingerprint = ExecutionFingerprint.generate(intent, plan, result, seed)

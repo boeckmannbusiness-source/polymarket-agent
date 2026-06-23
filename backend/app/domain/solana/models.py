@@ -1,5 +1,6 @@
 import hashlib
 import json
+from enum import Enum
 from typing import List, Optional, Any
 from pydantic import BaseModel, Field
 from app.domain.planning.transaction_instruction import TransactionInstruction
@@ -35,6 +36,20 @@ class TransactionEnvelope(BaseModel):
         return hashlib.sha256(raw.encode()).hexdigest()
 
 
+class SimulationInvalidationReason(str, Enum):
+    TTL_EXPIRED = "TTL_EXPIRED"
+    SLOT_DRIFT = "SLOT_DRIFT"
+    CAPABILITY_CHANGED = "CAPABILITY_CHANGED"
+    HASH_MISMATCH = "HASH_MISMATCH"
+
+
+class SimulationInvalidationError(Exception):
+    def __init__(self, reason: SimulationInvalidationReason, message: str):
+        self.reason = reason
+        self.message = message
+        super().__init__(f"{reason}: {message}")
+
+
 class SimulationReceipt(BaseModel):
     """A real receipt from on-chain simulation."""
     success: bool
@@ -43,7 +58,24 @@ class SimulationReceipt(BaseModel):
     logs: List[str]
     slot: int
     blockhash: str
+    created_slot: int = 0
+    ttl_slots: int = 150
+    expires_at_slot: int = 0
+    hash: Optional[str] = None
     metadata: Optional[dict] = Field(default_factory=dict)
+
+    def calculate_hash(self, tx_message: str) -> str:
+        """Produces a deterministic fingerprint of the simulation output."""
+        components = {
+            "tx_message": tx_message,
+            "blockhash": self.blockhash,
+            "slot": self.slot,
+            "compute_units": self.compute_units,
+            "estimated_fee": self.estimated_fee,
+            "metadata": self.metadata
+        }
+        raw = json.dumps(components, sort_keys=True)
+        return hashlib.sha256(raw.encode()).hexdigest()
 
 
 class SimulationSnapshot(BaseModel):

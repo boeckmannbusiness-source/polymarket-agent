@@ -1,15 +1,14 @@
 import time
 from typing import Optional
 from app.domain.solana.models import TransactionEnvelope, SimulationReceipt, SimulationSnapshot
-from app.services.rpc.interfaces import RpcWriter, RpcReader
+from app.services.rpc.interfaces import RpcReader
 
 
 class ChainSimulationService:
     """Service for simulating Solana transactions against real chain state."""
 
-    def __init__(self, rpc_reader: RpcReader, rpc_writer: RpcWriter):
+    def __init__(self, rpc_reader: RpcReader):
         self.rpc_reader = rpc_reader
-        self.rpc_writer = rpc_writer
 
     async def simulate(self, envelope: TransactionEnvelope) -> SimulationSnapshot:
         """Simulates the transaction and returns a snapshot."""
@@ -17,10 +16,10 @@ class ChainSimulationService:
         # 1. Get latest blockhash for the simulation context
         blockhash = await self.rpc_reader.get_latest_blockhash()
 
-        # 2. Perform simulation via RPC writer (which supports simulation even in sandbox)
+        # 2. Perform simulation via RPC reader (read-only)
         # Note: In real Solana, simulation usually requires the message to be built.
         # We assume the payload contains the base64 encoded transaction message/transaction.
-        raw_sim_result = await self.rpc_writer.simulate_transaction(envelope.payload.serialized_payload_b64)
+        raw_sim_result = await self.rpc_reader.simulate_transaction(envelope.payload.serialized_payload_b64)
 
         # 3. Map raw result to SimulationReceipt
         # This is a simplified mapping, real Solana RPC response is more complex
@@ -41,8 +40,11 @@ class ChainSimulationService:
             estimated_fee=envelope.fee_estimate, # Or calculated from units if possible
             logs=logs,
             slot=slot,
-            blockhash=blockhash
+            blockhash=blockhash,
+            created_slot=slot
         )
+        receipt.expires_at_slot = slot + receipt.ttl_slots
+        receipt.hash = receipt.calculate_hash(envelope.payload.serialized_payload_b64)
 
         snapshot = SimulationSnapshot(
             receipt=receipt,

@@ -1,6 +1,7 @@
 from typing import Optional, Any
 import httpx
 from app.services.rpc.interfaces import RpcReader, RpcHealth, RpcRateLimiter
+from app.services.replay.offline_guard import ReplayOfflineGuard, ReplayIsolationViolation
 
 
 class SolanaRpcReader(RpcReader, RpcHealth, RpcRateLimiter):
@@ -19,6 +20,8 @@ class SolanaRpcReader(RpcReader, RpcHealth, RpcRateLimiter):
             "method": "getBalance",
             "params": [address]
         }
+        # Use simulate_transaction in sandbox to satisfy requirement?
+        # No, the requirement says observe and simulate.
         response = await self._post(payload)
         return response.get("result", {}).get("value", 0)
 
@@ -56,6 +59,16 @@ class SolanaRpcReader(RpcReader, RpcHealth, RpcRateLimiter):
         response = await self._post(payload)
         return response.get("result", {}).get("value")
 
+    async def simulate_transaction(self, transaction_b64: str) -> dict:
+        payload = {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "simulateTransaction",
+            "params": [transaction_b64, {"encoding": "base64"}]
+        }
+        response = await self._post(payload)
+        return response.get("result", {}).get("value", {})
+
     async def is_healthy(self) -> bool:
         try:
             payload = {"jsonrpc": "2.0", "id": 1, "method": "getHealth", "params": []}
@@ -68,8 +81,14 @@ class SolanaRpcReader(RpcReader, RpcHealth, RpcRateLimiter):
         # Simple placeholder for rate limiting logic
         return True
 
+    async def close(self):
+        await self.client.aclose()
+
     async def _post(self, payload: dict) -> dict:
         """Internal POST helper. Fails closed on any error."""
+        if ReplayOfflineGuard.is_replay_active():
+            raise ReplayIsolationViolation(f"RPC call {payload.get('method')} forbidden during replay")
+
         try:
             headers = {"Content-Type": "application/json"}
             if self.api_key:
@@ -87,3 +106,9 @@ class SolanaRpcReader(RpcReader, RpcHealth, RpcRateLimiter):
             # Log error here if logger available
             # For now, we return empty structure or raise to fail closed
             raise RuntimeError(f"RPC call failed: {str(e)}") from e
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, exc_type, exc_val, exc_tb):
+        await self.close()

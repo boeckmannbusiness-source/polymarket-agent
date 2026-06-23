@@ -8,6 +8,7 @@ from app.domain.planning.transaction_plan import TransactionPlan
 from app.domain.planning.transaction_instruction import TransactionInstruction
 from app.domain.execution.execution_intent import ExecutionIntent
 from app.domain.solana.models import SimulationSnapshot
+from app.domain.capabilities.capability_snapshot import CapabilitySnapshot
 from app.domain.replay.replay_seed import ReplaySeed
 from app.domain.replay.execution_snapshot import ExecutionAuthorizationSnapshot
 
@@ -26,5 +27,6 @@ class ExecutionTrace(BaseModel):
     quantity_executed: Decimal
     latency_ms: float
     simulation: Optional[SimulationSnapshot] = None
+    capability: Optional[CapabilitySnapshot] = None
     authorization: Optional[ExecutionAuthorizationSnapshot] = None
     fingerprint: str | None = None
