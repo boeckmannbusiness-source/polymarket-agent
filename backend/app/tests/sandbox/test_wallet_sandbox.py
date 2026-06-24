@@ -102,6 +102,17 @@ async def test_sandbox_forbidden_operations(sandbox):
 
 
 @pytest.mark.asyncio
+async def test_sign_with_insufficient_capability(session_manager, sandbox):
+    # Create session with only SIMULATION_ONLY
+    session = await session_manager.create_session(
+        capabilities=[WalletCapabilityState.SIMULATION_ONLY]
+    )
+
+    with pytest.raises(PermissionError, match="Session is invalid or does not have signing capabilities"):
+        await sandbox.sign_transaction(session.session_id, "payload")
+
+
+@pytest.mark.asyncio
 async def test_replay_wallet_isolation():
     from app.domain.replay.execution_trace import ExecutionTrace
     from app.services.replay.replay_engine import ReplayEngine
