@@ -26,10 +26,18 @@ class ReplayEngine:
         if trace.simulation and trace.simulation.receipt:
             receipt = trace.simulation.receipt
             recomputed = receipt.calculate_hash(trace.plan.serialized_payload_b64)
+
+            # Verify both legacy hash and new simulation_hash if present
             if receipt.hash and receipt.hash != recomputed:
                 raise SimulationInvalidationError(
                     SimulationInvalidationReason.HASH_MISMATCH,
                     f"Simulation hash mismatch: {receipt.hash} != {recomputed}"
+                )
+
+            if receipt.simulation_hash and receipt.simulation_hash != recomputed:
+                raise SimulationInvalidationError(
+                    SimulationInvalidationReason.HASH_MISMATCH,
+                    f"Simulation reality hash mismatch: {receipt.simulation_hash} != {recomputed}"
                 )
 
         if trace.seed:
