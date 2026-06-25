@@ -1,6 +1,7 @@
 import time
 import uuid
 import hashlib
+import json
 from decimal import Decimal
 from typing import Optional
 from app.domain.solana.models import TransactionEnvelope, SimulationReceipt, SimulationSnapshot, SimulationInvalidationReason
@@ -75,7 +76,7 @@ class ChainSimulationService:
 
             # Reality Expansion
             simulation_id=str(uuid.uuid4()),
-            account_state_hash=hashlib.sha256(str(raw_sim_result.get("accounts", [])).encode()).hexdigest(),
+            account_state_hash=hashlib.sha256(json.dumps(sorted(raw_sim_result.get("accounts", []), key=lambda x: str(x)), sort_keys=True).encode()).hexdigest(),
             route_metadata={"status": route_status},
             valid_until_slot=slot + 150,
             compute_delta=compute_delta,
