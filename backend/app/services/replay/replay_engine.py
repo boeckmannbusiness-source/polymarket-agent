@@ -1,3 +1,4 @@
+from typing import Optional, Any
 from app.domain.solana.models import SimulationSnapshot, SimulationInvalidationError, SimulationInvalidationReason
 from app.domain.capabilities.capability_snapshot import CapabilitySnapshot
 from app.domain.planning.transaction_plan import TransactionPlan
@@ -73,6 +74,9 @@ class ReplayEngine:
         if trace.simulation:
             metadata["simulation"] = trace.simulation.model_dump()
 
+        if trace.wallet_receipt:
+            metadata["wallet_receipt"] = trace.wallet_receipt.model_dump()
+
         return ExecutionResult(
             execution_id=execution_id,
             adapter=trace.plan.quote.source if trace.plan.quote and trace.plan.quote.source and trace.plan.quote.source != "jupiter_simulated" else "jupiter_simulated",
@@ -102,6 +106,7 @@ class ReplayEngine:
         authorization: ExecutionAuthorizationSnapshot | None = None,
         simulation: SimulationSnapshot | None = None,
         capability: CapabilitySnapshot | None = None,
+        wallet_receipt: Any | None = None, # WalletReceipt
     ) -> ExecutionTrace:
         fill_prices = [f.price for f in (result.fills or [])]
         fill_sizes = [f.size for f in (result.fills or [])]
@@ -128,6 +133,7 @@ class ReplayEngine:
             authorization=authorization,
             simulation=simulation,
             capability=capability,
+            wallet_receipt=wallet_receipt,
         )
 
         trace.fingerprint = ExecutionFingerprint.generate(intent, plan, result, seed)

@@ -1,4 +1,6 @@
 from pydantic import BaseModel
+from typing import Optional
+from app.domain.wallet.models import WalletCapabilityState
 
 
 class CapabilitySnapshot(BaseModel):
@@ -8,3 +10,4 @@ class CapabilitySnapshot(BaseModel):
     simulation_enabled: bool
     signing_enabled: bool
     broadcast_enabled: bool
+    wallet_capability: Optional[WalletCapabilityState] = None

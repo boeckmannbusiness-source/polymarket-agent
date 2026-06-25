@@ -1,6 +1,13 @@
+from enum import Enum
 from decimal import Decimal
 from typing import List, Optional
 from pydantic import BaseModel, ConfigDict
+
+
+class WalletCapabilityState(str, Enum):
+    NO_WALLET = "NO_WALLET"
+    SIMULATION_ONLY = "SIMULATION_ONLY"
+    SIGN_ONLY = "SIGN_ONLY"
 
 
 class WalletIdentity(BaseModel):
@@ -33,3 +40,11 @@ class WalletTransaction(BaseModel):
     status: str  # pending, confirmed, failed
     timestamp: float
     metadata: Optional[dict] = None
+
+
+class WalletReceipt(BaseModel):
+    """Replay-compatible receipt of wallet activity."""
+    wallet_session_id: str
+    capability_state: WalletCapabilityState
+    signature_metadata: Optional[dict] = None
+    destroyed_at: Optional[float] = None
