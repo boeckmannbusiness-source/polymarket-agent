@@ -35,6 +35,14 @@ class AdmissionService:
                 raise ValueError("AdmissionReceipt required for replay")
             return await self._replay_admission(snapshot, stored_receipt)
 
+        # 0. Check expiration of existing receipt if provided (for planning freshness)
+        if stored_receipt and snapshot.evaluation_slot > stored_receipt.valid_until_slot:
+            logger.warning("admission_receipt_expired",
+                           admission_id=stored_receipt.admission_id,
+                           current_slot=snapshot.evaluation_slot,
+                           valid_until=stored_receipt.valid_until_slot)
+            raise ValueError(f"Admission receipt {stored_receipt.admission_id} has expired (slot {stored_receipt.valid_until_slot})")
+
         # 1. Evaluate market quality
         quality_decision, quality_reasons = self._quality_engine.evaluate(snapshot)
 

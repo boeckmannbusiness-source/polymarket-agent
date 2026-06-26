@@ -127,3 +127,18 @@ async def test_admission_no_execution(admission_service, asset_id, capability_sn
     # Ensure no execution related fields are present (by design of the model)
     assert receipt.decision in [AdmissionDecision.ALLOW_SIMULATION, AdmissionDecision.WATCH, AdmissionDecision.BLOCK]
     assert receipt.decision != "EXECUTE"
+
+@pytest.mark.asyncio
+async def test_admission_expired_receipt(admission_service, asset_id, capability_snapshot):
+    snapshot = create_snapshot(asset_id)
+    receipt = await admission_service.admit_asset(snapshot, capability_snapshot)
+
+    # Try to use receipt in a future slot beyond valid_until_slot
+    future_snapshot = snapshot.model_copy(update={"evaluation_slot": receipt.valid_until_slot + 1})
+
+    with pytest.raises(ValueError, match="has expired"):
+        await admission_service.admit_asset(future_snapshot, capability_snapshot, is_replay=False, stored_receipt=receipt)
+
+    # Replay of expired receipt should still work (for historical verification)
+    replayed = await admission_service.admit_asset(snapshot, capability_snapshot, is_replay=True, stored_receipt=receipt)
+    assert replayed.admission_id == receipt.admission_id
