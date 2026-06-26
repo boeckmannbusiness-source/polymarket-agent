@@ -13,6 +13,7 @@ from app.domain.replay.replay_seed import ReplaySeed
 from app.domain.replay.execution_snapshot import ExecutionAuthorizationSnapshot
 from app.domain.wallet.models import WalletReceipt
 from app.domain.admission.models import AdmissionReceipt
+from app.domain.capital.models import RiskReceipt
 
 
 class ExecutionTrace(BaseModel):
@@ -33,4 +34,5 @@ class ExecutionTrace(BaseModel):
     authorization: Optional[ExecutionAuthorizationSnapshot] = None
     wallet_receipt: Optional[WalletReceipt] = None
     admission: Optional[AdmissionReceipt] = None
+    risk: Optional[RiskReceipt] = None
     fingerprint: str | None = None
