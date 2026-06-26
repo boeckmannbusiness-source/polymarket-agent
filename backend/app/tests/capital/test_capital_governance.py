@@ -121,6 +121,24 @@ def test_emergency_stop(policy_service, exposure_model, mock_trace, mock_simulat
     assert "EMERGENCY_STOP" in receipt.reason_codes
 
 
+def test_emergency_stop_dominance(policy_service, exposure_model, mock_trace, mock_simulation, mock_admission, mock_capability):
+    # Even if capital_enabled = True (future potential), emergency_stop must BLOCK
+    ps = MagicMock(spec=PolicyService)
+    policy = policy_service.get_active_policy()
+    policy.emergency_stop = True
+    ps.get_active_policy.return_value = policy
+
+    gov = CapitalGovernor(ps, exposure_model)
+    receipt = gov.evaluate_execution(mock_trace, mock_simulation, mock_admission, mock_capability)
+
+    # Enforce with hypothetical enabled guard
+    guard = CapitalGuard(capital_enabled=True)
+    protected_receipt = guard.enforce(receipt)
+
+    assert protected_receipt.capital_decision == CapitalDecision.BLOCK
+    assert "EMERGENCY_STOP" in protected_receipt.reason_codes
+
+
 def test_capital_disabled(governor, mock_trace, mock_simulation, mock_admission, mock_capability):
     # Governor allows it
     receipt = governor.evaluate_execution(mock_trace, mock_simulation, mock_admission, mock_capability)
