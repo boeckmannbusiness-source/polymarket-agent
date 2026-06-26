@@ -85,6 +85,9 @@ class ReplayEngine:
         if trace.wallet_receipt:
             metadata["wallet_receipt"] = trace.wallet_receipt.model_dump()
 
+        if trace.admission:
+            metadata["admission"] = trace.admission.model_dump()
+
         return ExecutionResult(
             execution_id=execution_id,
             adapter=trace.plan.quote.source if trace.plan.quote and trace.plan.quote.source and trace.plan.quote.source != "jupiter_simulated" else "jupiter_simulated",
@@ -115,6 +118,7 @@ class ReplayEngine:
         simulation: SimulationSnapshot | None = None,
         capability: CapabilitySnapshot | None = None,
         wallet_receipt: Any | None = None, # WalletReceipt
+        admission: Any | None = None, # AdmissionReceipt
     ) -> ExecutionTrace:
         fill_prices = [f.price for f in (result.fills or [])]
         fill_sizes = [f.size for f in (result.fills or [])]
@@ -142,6 +146,7 @@ class ReplayEngine:
             simulation=simulation,
             capability=capability,
             wallet_receipt=wallet_receipt,
+            admission=admission,
         )
 
         trace.fingerprint = ExecutionFingerprint.generate(intent, plan, result, seed)
