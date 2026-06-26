@@ -8,6 +8,8 @@ from app.services.planning.quote_provider import QuoteProvider
 from app.services.planning.route_planner import RoutePlanner
 from app.services.planning.transaction_builder import TransactionBuilder
 from app.services.capabilities import CapabilityResolver, CapabilityValidator
+from app.services.admission.admission_service import AdmissionService
+from app.domain.admission.models import AssetSnapshot, AdmissionDecision
 from app.core.logging import logger
 from app.services.audit.audit_logger import emit
 
@@ -18,12 +20,14 @@ class Planner:
         quote_provider: QuoteProvider,
         route_planner: RoutePlanner,
         transaction_builder: TransactionBuilder,
+        admission_service: AdmissionService | None = None,
     ):
         self._quote_provider = quote_provider
         self._route_planner = route_planner
         self._transaction_builder = transaction_builder
         self._capability_resolver = CapabilityResolver()
         self._capability_validator = CapabilityValidator()
+        self._admission_service = admission_service or AdmissionService()
 
     async def plan(
         self,
@@ -37,6 +41,10 @@ class Planner:
     ) -> TransactionPlan:
         venue = instrument.venue
         capabilities = self._capability_resolver.resolve(venue)
+
+        # Asset Admission Check
+        if asset_resolution:
+            await self._check_admission(asset_resolution, capabilities, **kwargs)
 
         quote = await self._quote_provider.get_quote(
             instrument, amount_in, side, constraints, asset_resolution, quote_asset_resolution
@@ -58,6 +66,30 @@ class Planner:
     async def _validate_route(self, route, capabilities):
         # Specific capability checks for route if needed
         pass
+
+    async def _check_admission(self, asset_resolution, capabilities, **kwargs):
+        # In a real scenario, we would fetch market data here to create the snapshot.
+        # For now, we'll assume the snapshot is provided in kwargs or create a placeholder.
+        snapshot = kwargs.get("asset_snapshot")
+        if not snapshot:
+             # Placeholder snapshot if not provided - in production this would be real data
+             snapshot = AssetSnapshot(
+                 asset_id=asset_resolution.asset_id,
+                 symbol=asset_resolution.asset_id.symbol,
+                 venue=asset_resolution.asset_id.venue,
+                 market_cap=Decimal("0"),
+                 liquidity=Decimal("0"),
+                 asset_age_days=0,
+                 evaluation_slot=kwargs.get("slot", 0)
+             )
+
+        receipt = await self._admission_service.admit_asset(snapshot, capabilities)
+
+        if receipt.decision == AdmissionDecision.BLOCK:
+            logger.error("asset_admission_blocked",
+                         asset_id=asset_resolution.asset_id.canonical_id,
+                         reasons=receipt.reasons)
+            raise ValueError(f"Asset {asset_resolution.asset_id.canonical_id} is BLOCKED from planning: {receipt.reasons}")
 
     async def _validate_transaction(self, plan: TransactionPlan, capabilities):
         report = self._capability_validator.validate_plan(plan, capabilities)
