@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import String, Numeric, DateTime, Text, Float
+from sqlalchemy import String, Numeric, DateTime, Text, Float, Boolean
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 from sqlalchemy.sql import func
@@ -28,4 +28,15 @@ class ShadowDecisionLog(Base):
     approval_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
     rejection_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
     signal_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    confidence: Mapped[float | None] = mapped_column(Float, nullable=True)
+    decision: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    simulated_size: Mapped[float | None] = mapped_column(Float, nullable=True)
+    simulated_entry_price: Mapped[float | None] = mapped_column(Float, nullable=True)
+    simulated_exit_price: Mapped[float | None] = mapped_column(Float, nullable=True)
+    expected_ev: Mapped[float | None] = mapped_column(Float, nullable=True)
+    actual_ev: Mapped[float | None] = mapped_column(Float, nullable=True)
+    replay_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    replay_match: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    certification_version: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    certification_violation: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
