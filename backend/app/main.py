@@ -62,8 +62,11 @@ async def lifespan(app: FastAPI):
 
     # Workstream 1: Startup Safety Assertions
     from app.services.capabilities.startup_validation import StartupSafetyValidator
+    from app.exchanges import ExchangeAdapterRegistry
     try:
         StartupSafetyValidator.validate()
+        ExchangeAdapterRegistry.freeze()
+        logger.info("adapter_registry_frozen")
     except Exception as e:
         logger.critical("startup_safety_violation_abort", error=str(e))
         raise

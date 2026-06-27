@@ -1,0 +1,100 @@
+backend/app/main.py:    except Exception as e:
+backend/app/main.py:    except Exception as e:
+backend/app/main.py:    except Exception as e:
+backend/app/main.py:    except Exception as e:
+backend/app/main.py:    except Exception:
+backend/app/main.py:                except Exception as e:
+backend/app/main.py:                except Exception:
+backend/app/main.py:        except Exception as e:
+backend/app/main.py:    except Exception as e:
+backend/app/main.py:    except Exception as e:
+backend/app/main.py:        except Exception:
+backend/app/main.py:        except Exception:
+backend/app/main.py:        except Exception:
+backend/app/main.py:        except Exception:
+backend/app/main.py:        except Exception:
+backend/app/main.py:        except Exception as e:
+backend/app/main.py:                except Exception as e:
+backend/app/main.py:        except Exception as e:
+backend/app/main.py:        except Exception as e:
+backend/app/main.py:        except Exception as e:
+backend/app/main.py:        except Exception as e:
+backend/app/main.py:        except Exception as e:
+backend/app/main.py:        except Exception as e:
+backend/app/main.py:        except Exception as e:
+backend/app/main.py:        except Exception as e:
+backend/app/main.py:        except Exception as e:
+backend/app/main.py:        except Exception as e:
+backend/app/main.py:        except Exception as e:
+backend/app/main.py:        except Exception as e:
+backend/app/main.py:    except Exception as e:
+backend/app/main.py:        except Exception as e:
+backend/app/main.py:        except Exception as e:
+backend/app/main.py:        except Exception as e:
+backend/app/main.py:        except Exception as e:
+backend/app/main.py:        except Exception as e:
+backend/app/main.py:        except Exception as e:
+backend/app/main.py:                        except Exception:
+backend/app/main.py:                            except Exception:
+backend/app/main.py:        except Exception:
+backend/app/main.py:                        except Exception:
+backend/app/main.py:                            except Exception:
+backend/app/main.py:        except Exception:
+backend/app/main.py:                    except Exception:
+backend/app/main.py:        except Exception:
+backend/app/main.py:        except Exception as e:
+backend/app/main.py:        except Exception as e:
+backend/app/main.py:    except Exception:
+backend/app/main.py:    except Exception:
+backend/app/main.py:    except Exception:
+backend/app/main.py:    except Exception:
+backend/app/main.py:    except Exception:
+backend/app/main.py:    except Exception:
+backend/app/main.py:    except Exception:
+backend/app/main.py:            except Exception:
+backend/app/main.py:            except Exception as e:
+backend/app/main.py:    except Exception as e:
+backend/app/main.py:    except Exception as e:
+backend/app/main.py:            except Exception:
+backend/app/main.py:    except Exception as e:
+backend/app/main.py:    except Exception as e:
+backend/app/main.py:    except Exception as e:
+backend/app/main.py:    except Exception as e:
+backend/app/main.py:    except Exception as e:
+backend/app/main.py:    except Exception as e:
+backend/app/main.py:        except Exception as e:
+backend/app/main.py:            except Exception as e:
+backend/app/main.py:        except Exception as e:
+backend/app/main.py:        except Exception:
+backend/app/main.py:            except Exception:
+backend/app/main.py:            except Exception:
+backend/app/main.py:            except Exception:
+backend/app/main.py:            except Exception:
+backend/app/main.py:            except Exception:
+backend/app/main.py:            except Exception:
+backend/app/main.py:        except Exception as e:
+backend/app/main.py:        except Exception as e:
+backend/app/agents/execution_agent.py:            except Exception as e:
+backend/app/agents/execution_agent.py:        except Exception as e:
+backend/app/agents/execution_agent.py:            except Exception as e:
+backend/app/agents/risk_agent.py:            except Exception as e:
+backend/app/agents/whale_agent.py:                    except Exception as e:
+backend/app/agents/whale_agent.py:            except Exception as e:
+backend/app/agents/monitoring_agent.py:            except Exception as e:
+backend/app/agents/signal_agent.py:            except Exception as e:
+backend/app/agents/signal_agent.py:            except Exception as e:
+backend/app/agents/research_agent.py:            except Exception as e:
+backend/app/services/portfolio/portfolio_cache_service.py:            except Exception as e:
+backend/app/services/portfolio/portfolio_cache_service.py:            except Exception as e:
+backend/app/services/portfolio/portfolio_cache_service.py:                except Exception:
+backend/app/services/recovery/order_recovery_service.py:            except Exception:
+backend/app/services/recovery/order_recovery_service.py:            except Exception:
+backend/app/services/recovery/order_recovery_service.py:        except Exception as e:
+backend/app/services/recovery/order_recovery_service.py:            except Exception:
+backend/app/services/recovery/order_recovery_service.py:        except Exception as e:
+backend/app/services/recovery/order_recovery_service.py:        except Exception:
+backend/app/services/backtest_engine.py:        except Exception as e:
+backend/app/services/shadow/portfolio_simulator.py:        except Exception:
+backend/app/services/shadow/portfolio_simulator.py:        except Exception:
+backend/app/services/shadow/portfolio_simulator.py:        except Exception:
+backend/app/services/shadow/portfolio_simulator.py:        except Exception:
