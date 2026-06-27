@@ -4,12 +4,29 @@
     "purpose": "Sandbox Certification Architecture Snapshot"
   },
   "exchanges": {
-    "frozen": false,
+    "frozen": true,
     "adapters": [
       "paper",
       "live_jupiter",
       "live"
-    ]
+    ],
+    "metadata": {
+      "paper": {
+        "enabled": true,
+        "sandbox_allowed": true,
+        "description": "In-memory paper trading adapter"
+      },
+      "live_jupiter": {
+        "enabled": true,
+        "sandbox_allowed": true,
+        "description": "Simulated Jupiter execution for Solana"
+      },
+      "live": {
+        "enabled": false,
+        "sandbox_allowed": false,
+        "description": "Legacy live placeholder (Disabled)"
+      }
+    }
   },
   "capabilities": {
     "venues": {

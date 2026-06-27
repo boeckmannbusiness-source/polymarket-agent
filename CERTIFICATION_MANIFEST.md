@@ -20,10 +20,10 @@ Single machine-readable source of certification assumptions for Sandbox Executio
 
 | Invariant | Enforcement Component | Proof Document | Test File | Owner Layer |
 |-----------|-----------------------|----------------|-----------|-------------|
-| **EXECUTION_MODE** | `StartupSafetyValidator` | `STARTUP_ASSERTION_PROOF.md` | `backend/app/tests/test_startup_safety.py` | Capabilities |
-| **STRICT_LIVE_ENABLED** | `StartupSafetyValidator` | `STARTUP_ASSERTION_PROOF.md` | `backend/app/tests/test_startup_safety.py` | Capabilities |
-| **CAPITAL_ENABLED** | `StartupSafetyValidator` | `STARTUP_ASSERTION_PROOF.md` | `backend/app/tests/test_startup_safety.py` | Capabilities |
-| **Registry Frozen** | `ExchangeAdapterRegistry` | `SYSTEM_STATE.md` | `backend/app/tests/architecture/test_registry_immutability.py` | Exchanges |
+| **EXECUTION_MODE** | `StartupSafetyValidator` | `STARTUP_ASSERTION_PROOF.md` | `backend/app/tests/certification/test_certification_drift.py` | Capabilities |
+| **STRICT_LIVE_ENABLED** | `StartupSafetyValidator` | `STARTUP_ASSERTION_PROOF.md` | `backend/app/tests/certification/test_certification_drift.py` | Capabilities |
+| **CAPITAL_ENABLED** | `StartupSafetyValidator` | `STARTUP_ASSERTION_PROOF.md` | `backend/app/tests/certification/test_certification_drift.py` | Capabilities |
+| **Registry Frozen** | `ExchangeAdapterRegistry` | `SYSTEM_STATE.md` | `backend/app/tests/certification/test_certification_drift.py` | Exchanges |
 | **No Broadcast Writer** | `SandboxRpcWriter` | `RPC_READINESS.md` | `backend/app/tests/sandbox/test_execution_governance.py` | RPC |
 | **Artifact Isolation** | `SignedArtifact` | `SIGNED_ARTIFACT_PROOF.md` | `backend/app/tests/test_signed_artifact_boundary.py` | Wallet |
 | **Replay RPC Guard** | `ReplayOfflineGuard` | `REPLAY_INTEGRITY_REPORT.md` | `backend/app/tests/architecture/test_replay_determinism.py` | Replay |

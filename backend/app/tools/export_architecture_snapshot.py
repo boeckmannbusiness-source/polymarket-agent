@@ -14,6 +14,10 @@ from app.services.execution.governance.execution_governor import ExecutionAuthor
 from app.services.replay.offline_guard import ReplayIsolationViolation
 
 def export_snapshot():
+    # Ensure registry is frozen to reflect certified state
+    if not getattr(ExchangeAdapterRegistry, "_frozen", False):
+        ExchangeAdapterRegistry.freeze()
+
     snapshot = {
         "metadata": {
             "version": "1.0",
@@ -21,7 +25,8 @@ def export_snapshot():
         },
         "exchanges": {
             "frozen": getattr(ExchangeAdapterRegistry, "_frozen", False),
-            "adapters": list(ExchangeAdapterRegistry._adapters.keys())
+            "adapters": list(ExchangeAdapterRegistry._adapters.keys()),
+            "metadata": getattr(ExchangeAdapterRegistry, "_metadata", {})
         },
         "capabilities": {
             "venues": {}

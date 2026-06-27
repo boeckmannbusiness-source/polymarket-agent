@@ -101,3 +101,43 @@ def test_safety_exceptions_inherit_from_base():
     assert issubclass(StartupSafetyViolation, Exception)
     assert issubclass(ExecutionAuthorizationError, Exception)
     assert issubclass(ReplayIsolationViolation, Exception)
+
+def test_snapshot_matches_certification_manifest():
+    """Verify ARCHITECTURE_SNAPSHOT matches CERTIFICATION_MANIFEST assumptions."""
+    import json
+    import os
+
+    snapshot_path = "ARCHITECTURE_SNAPSHOT.json"
+    manifest_path = "CERTIFICATION_MANIFEST.md"
+
+    assert os.path.exists(snapshot_path), "Snapshot must exist"
+    assert os.path.exists(manifest_path), "Manifest must exist"
+
+    with open(snapshot_path, "r") as f:
+        snapshot = json.load(f)
+
+    # 1. Registry frozen == true
+    assert snapshot["exchanges"]["frozen"] is True
+
+    # 2. No active live adapter in sandbox
+    # 'live' is disabled, 'paper' and 'live_jupiter' are allowed
+    for adapter_name, meta in snapshot["exchanges"]["metadata"].items():
+        if meta.get("enabled", False):
+            # If enabled, must be paper or simulation
+            assert adapter_name in {"paper", "live_jupiter"}, f"Live adapter {adapter_name} enabled!"
+            assert meta.get("sandbox_allowed") is True
+        else:
+            # If it's the legacy 'live' one, it must be disabled
+            if adapter_name == "live":
+                assert meta.get("enabled") is False
+                assert meta.get("sandbox_allowed") is False
+
+    # 3. Startup invariants present
+    expected_invariants = {
+        "EXECUTION_MODE in {simulation, sandbox}",
+        "STRICT_LIVE_ENABLED == False",
+        "CAPITAL_ENABLED == False",
+        "ExchangeAdapterRegistry is frozen"
+    }
+    snapshot_invariants = set(snapshot["startup_invariants"])
+    assert expected_invariants.issubset(snapshot_invariants)
