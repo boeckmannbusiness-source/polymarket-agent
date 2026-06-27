@@ -6,6 +6,10 @@ class ConfigurationError(PolymarketAgentError):
     """Raised when required configuration is missing or invalid."""
 
 
+class StartupSafetyViolation(ConfigurationError):
+    """Raised when process starts with unsafe configuration."""
+
+
 class IngestionError(PolymarketAgentError):
     """Raised when data ingestion fails."""
 

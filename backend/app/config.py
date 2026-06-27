@@ -82,6 +82,9 @@ class Settings(BaseSettings):
 
     # Trading
     TRADING_MODE: Literal["paper", "live"] = "paper"
+    EXECUTION_MODE: Literal["simulation", "sandbox", "live"] = "simulation"
+    STRICT_LIVE_ENABLED: bool = False
+    CAPITAL_ENABLED: bool = False
     PAPER_INITIAL_CAPITAL: float = 10000.0
     MAX_POSITION_SIZE_PERCENT: float = 10.0
     MAX_DAILY_LOSS: float = 500.0

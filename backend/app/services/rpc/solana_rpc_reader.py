@@ -74,6 +74,8 @@ class SolanaRpcReader(RpcReader, RpcHealth, RpcRateLimiter):
             payload = {"jsonrpc": "2.0", "id": 1, "method": "getHealth", "params": []}
             response = await self._post(payload)
             return response.get("result") == "ok"
+        except (ReplayIsolationViolation, PermissionError):
+            raise
         except Exception:
             return False
 
@@ -102,6 +104,8 @@ class SolanaRpcReader(RpcReader, RpcHealth, RpcRateLimiter):
             response = await self.client.post(self.endpoint, json=payload, headers=headers)
             response.raise_for_status()
             return response.json()
+        except (ReplayIsolationViolation, PermissionError):
+            raise
         except Exception as e:
             # Log error here if logger available
             # For now, we return empty structure or raise to fail closed
