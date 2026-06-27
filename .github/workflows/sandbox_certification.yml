@@ -1,0 +1,85 @@
+name: Sandbox Certification Assurance
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main, develop ]
+
+jobs:
+  certification-gate:
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: password
+          POSTGRES_DB: polymarket_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+      redis:
+        image: redis:7
+        ports:
+          - 6379:6379
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.11'
+        cache: 'pip'
+
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install .
+        pip install pytest pytest-asyncio pytest-cov aiosqlite
+
+    - name: 1. Startup Safety Verification
+      run: |
+        export PYTHONPATH=$PYTHONPATH:$(pwd)/backend
+        pytest backend/app/tests/test_startup_safety.py
+
+    - name: 2. Architecture Boundary Verification
+      run: |
+        export PYTHONPATH=$PYTHONPATH:$(pwd)/backend
+        pytest backend/app/tests/architecture/
+
+    - name: 3. Certification Drift Detection
+      run: |
+        export PYTHONPATH=$PYTHONPATH:$(pwd)/backend
+        pytest backend/app/tests/certification/
+
+    - name: 4. Replay Determinism Verification
+      run: |
+        export PYTHONPATH=$PYTHONPATH:$(pwd)/backend
+        pytest backend/app/tests/architecture/test_replay_determinism.py
+
+    - name: 5. Guard Dominance Verification
+      run: |
+        export PYTHONPATH=$PYTHONPATH:$(pwd)/backend
+        pytest backend/app/tests/architecture/test_guard_dominance.py
+
+    - name: Generate Architecture Snapshot
+      run: |
+        export PYTHONPATH=$PYTHONPATH:$(pwd)/backend
+        python backend/app/tools/export_architecture_snapshot.py
+
+    - name: Upload Certification Artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: certification-artifacts
+        path: |
+          CERTIFICATION_MANIFEST.md
+          ARCHITECTURE_SNAPSHOT.json
+          CERTIFICATION_REVOCATION_POLICY.md

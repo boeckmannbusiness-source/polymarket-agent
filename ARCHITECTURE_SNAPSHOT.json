@@ -1,0 +1,111 @@
+{
+  "metadata": {
+    "version": "1.0",
+    "purpose": "Sandbox Certification Architecture Snapshot"
+  },
+  "exchanges": {
+    "frozen": false,
+    "adapters": [
+      "paper",
+      "live_jupiter",
+      "live"
+    ]
+  },
+  "capabilities": {
+    "venues": {
+      "paper": [
+        "EXECUTION",
+        "MARKET_RESOLUTION",
+        "PORTFOLIO_FEEDBACK",
+        "QUOTE",
+        "REPLAY",
+        "ROUTING",
+        "SIMULATION",
+        "TRANSACTION_BUILDING"
+      ],
+      "live": [
+        "EXECUTION",
+        "QUOTE",
+        "ROUTING",
+        "TRANSACTION_BUILDING"
+      ],
+      "polymarket": [
+        "EXECUTION",
+        "MARKET_RESOLUTION",
+        "PORTFOLIO_FEEDBACK",
+        "QUOTE",
+        "REPLAY",
+        "ROUTING",
+        "TRANSACTION_BUILDING"
+      ],
+      "live_jupiter": [
+        "EXECUTION",
+        "MULTI_HOP",
+        "PORTFOLIO_FEEDBACK",
+        "QUOTE",
+        "REPLAY",
+        "ROUTING",
+        "SIMULATION",
+        "SLIPPAGE_MODEL",
+        "TRANSACTION_BUILDING"
+      ]
+    }
+  },
+  "governance": {
+    "execution_modes": [
+      "disabled",
+      "simulation",
+      "sandbox",
+      "live"
+    ],
+    "policies": {
+      "disabled": {
+        "allowed_permissions": [],
+        "requires_explicit_approval": false
+      },
+      "simulation": {
+        "allowed_permissions": [
+          "build",
+          "replay",
+          "rpc_read"
+        ],
+        "requires_explicit_approval": false
+      },
+      "sandbox": {
+        "allowed_permissions": [
+          "build",
+          "replay",
+          "rpc_read",
+          "rpc_simulate",
+          "sign"
+        ],
+        "requires_explicit_approval": false
+      },
+      "live": {
+        "allowed_permissions": [
+          "build",
+          "capital_deploy",
+          "replay",
+          "rpc_read",
+          "rpc_simulate",
+          "rpc_write",
+          "sign"
+        ],
+        "requires_explicit_approval": true
+      }
+    }
+  },
+  "exceptions": {
+    "safety_critical": [
+      "StartupSafetyViolation",
+      "ExecutionAuthorizationError",
+      "ReplayIsolationViolation"
+    ]
+  },
+  "startup_invariants": [
+    "EXECUTION_MODE in {simulation, sandbox}",
+    "STRICT_LIVE_ENABLED == False",
+    "CAPITAL_ENABLED == False",
+    "ExchangeAdapterRegistry is frozen"
+  ]
+}
