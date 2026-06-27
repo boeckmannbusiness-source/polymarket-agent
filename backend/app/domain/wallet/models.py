@@ -48,3 +48,21 @@ class WalletReceipt(BaseModel):
     capability_state: WalletCapabilityState
     signature_metadata: Optional[dict] = None
     destroyed_at: Optional[float] = None
+
+
+class SignedArtifact(BaseModel):
+    """
+    Isolated container for signed transaction data.
+    Strictly transient. Serialization is forbidden to prevent persistence.
+    """
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    signature: str
+    wallet_address: str
+    timestamp: float
+
+    def model_dump(self, *args, **kwargs):
+        raise PermissionError("Serialization of SignedArtifact is forbidden by SignedArtifactPolicy")
+
+    def model_dump_json(self, *args, **kwargs):
+        raise PermissionError("Serialization of SignedArtifact is forbidden by SignedArtifactPolicy")

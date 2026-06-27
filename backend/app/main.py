@@ -60,6 +60,17 @@ async def lifespan(app: FastAPI):
     global _walk_forward_engine, _shadow_trading_service, _stress_test_engine, _live_state_machine, _system_health_store
     setup_logging()
 
+    # Workstream 1: Startup Safety Assertions
+    from app.services.capabilities.startup_validation import StartupSafetyValidator
+    from app.exchanges import ExchangeAdapterRegistry
+    try:
+        StartupSafetyValidator.validate()
+        ExchangeAdapterRegistry.freeze()
+        logger.info("adapter_registry_frozen")
+    except Exception as e:
+        logger.critical("startup_safety_violation_abort", error=str(e))
+        raise
+
     # Sprint 1.8A Startup Validation
     from app.services.capabilities import validate_all
     from app.services.assets.bootstrap import bootstrap_asset_registry

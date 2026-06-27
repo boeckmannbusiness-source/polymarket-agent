@@ -1,7 +1,10 @@
+import time
 from typing import Optional, Any
 from app.services.wallet.session.manager import WalletSessionManager
 from app.services.wallet.ephemeral_provider import EphemeralWalletProvider
 from app.services.execution.governance.execution_governor import ExecutionGovernor
+from app.domain.wallet.models import SignedArtifact
+from app.services.wallet.policy import SignedArtifactPolicy
 
 
 class SigningSandbox:
@@ -20,10 +23,10 @@ class SigningSandbox:
         self._provider = provider
         self._governor = governor
 
-    async def sign_transaction(self, session_id: str, payload: str) -> str:
+    async def sign_transaction(self, session_id: str, payload: str) -> SignedArtifact:
         """
         Signs a transaction payload if the session is valid.
-        This remains purely local.
+        Returns a transient SignedArtifact.
         """
         if not self._session_manager.validate_session_for_signing(session_id):
             raise PermissionError("Session is invalid or does not have signing capabilities")
@@ -37,7 +40,17 @@ class SigningSandbox:
 
         # Perform local signing
         signature = await self._provider.sign(payload, session.wallet.address)
-        return signature
+
+        artifact = SignedArtifact(
+            signature=signature,
+            wallet_address=session.wallet.address,
+            timestamp=time.time()
+        )
+
+        # Enforce no persistence policy
+        SignedArtifactPolicy.forbid_persistence(artifact)
+
+        return artifact
 
     async def simulate_transaction(self, session_id: str, payload: str) -> Any:
         """

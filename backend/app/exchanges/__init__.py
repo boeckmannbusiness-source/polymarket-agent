@@ -4,10 +4,18 @@ from app.exchanges.paper import PaperExchangeAdapter
 
 class ExchangeAdapterRegistry:
     _adapters: dict[str, type[BaseExchangeAdapter]] = {}
+    _frozen: bool = False
 
     @classmethod
     def register(cls, engine_type: str, adapter_cls: type[BaseExchangeAdapter]) -> None:
+        if cls._frozen:
+            raise PermissionError("ExchangeAdapterRegistry is frozen. Runtime registration is forbidden.")
         cls._adapters[engine_type] = adapter_cls
+
+    @classmethod
+    def freeze(cls) -> None:
+        """Freezes the registry to prevent further registrations."""
+        cls._frozen = True
 
     @classmethod
     def get(cls, engine_type: str) -> type[BaseExchangeAdapter] | None:

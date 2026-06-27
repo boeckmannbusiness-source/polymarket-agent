@@ -1,7 +1,51 @@
+from app.config import settings
+from app.core.exceptions import StartupSafetyViolation
+from app.core.logging import logger
 from app.exchanges import ExchangeAdapterRegistry
 from app.domain.capabilities import VenueCapability
 from .capability_registry import capability_registry, CapabilityRegistrationError
 from .capability_validator import CapabilityValidator
+
+
+class StartupSafetyValidator:
+    """
+    Enforces structural safety invariants at process boot.
+    No warning mode. No auto-fix. No fallback.
+    """
+
+    @staticmethod
+    def validate():
+        logger.info("startup_safety_validation_started")
+
+        # 1. EXECUTION_MODE ∈ {SIMULATION, SANDBOX}
+        if settings.EXECUTION_MODE not in ["simulation", "sandbox"]:
+            logger.critical("startup_safety_violation",
+                            field="EXECUTION_MODE",
+                            value=settings.EXECUTION_MODE,
+                            allowed=["simulation", "sandbox"])
+            raise StartupSafetyViolation(
+                f"Invalid EXECUTION_MODE: {settings.EXECUTION_MODE}. Must be SIMULATION or SANDBOX."
+            )
+
+        # 2. STRICT_LIVE_ENABLED == False
+        if settings.STRICT_LIVE_ENABLED is not False:
+            logger.critical("startup_safety_violation",
+                            field="STRICT_LIVE_ENABLED",
+                            value=settings.STRICT_LIVE_ENABLED)
+            raise StartupSafetyViolation(
+                "STRICT_LIVE_ENABLED must be False for certification closure."
+            )
+
+        # 3. CAPITAL_ENABLED == False
+        if settings.CAPITAL_ENABLED is not False:
+            logger.critical("startup_safety_violation",
+                            field="CAPITAL_ENABLED",
+                            value=settings.CAPITAL_ENABLED)
+            raise StartupSafetyViolation(
+                "CAPITAL_ENABLED must be False for certification closure."
+            )
+
+        logger.info("startup_safety_validation_passed")
 
 
 def validate_registry_integrity():

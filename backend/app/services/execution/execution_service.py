@@ -437,6 +437,8 @@ class ExecutionService:
                 entry_price=float(result.average_price or 0),
             )
             execution_result_shadow_total.inc()
+        except (ExecutionAuthorizationError, PermissionError) as e:
+            raise
         except Exception as e:
             logger.debug("shadow_execution_log_skipped", error=str(e))
 
@@ -477,6 +479,8 @@ class ExecutionService:
             })
 
             await self._consistency_validation(result, snapshot, projections, feedback, trace_id)
+        except (ExecutionAuthorizationError, PermissionError) as e:
+            raise
         except Exception as e:
             logger.debug("shadow_feedback_loop_skipped", error=str(e), trace_id=trace_id)
 
@@ -732,6 +736,8 @@ class ExecutionService:
             await self._validate_determinism(trace, result, trace_id)
 
             replay_execution_total.inc()
+        except (ExecutionAuthorizationError, PermissionError) as e:
+            raise
         except Exception as e:
             logger.error("replay_integration_failed", error=str(e), trace_id=trace_id)
 

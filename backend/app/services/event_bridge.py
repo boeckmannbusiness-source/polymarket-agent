@@ -12,6 +12,7 @@ from app.core.metrics import dlq_size, pel_depth, dlq_replay_success_total, dlq_
 from app.core.circuit_breaker import CircuitBreaker
 from app.database import async_session_factory
 from app.models import MarketEvent, Market
+from app.services.execution.governance.execution_governor import ExecutionAuthorizationError
 
 
 class EventPersistenceBridge:
@@ -67,6 +68,8 @@ class EventPersistenceBridge:
                 await EventBus.ack_message(r, "market:data", "persistence_bridge", msg["id"])
                 self._processed += 1
                 persisted += 1
+            except (ExecutionAuthorizationError, PermissionError):
+                raise
             except Exception as e:
                 self._failed_count += 1
                 failed += 1
@@ -145,6 +148,8 @@ class EventPersistenceBridge:
                         )
             except asyncio.CancelledError:
                 break
+            except (ExecutionAuthorizationError, PermissionError):
+                raise
             except Exception as e:
                 logger.error("bridge_pel_error", error=str(e))
             await asyncio.sleep(settings.PENDING_RECOVERY_INTERVAL)
@@ -182,6 +187,8 @@ class EventPersistenceBridge:
                         self._processed += 1
             except asyncio.CancelledError:
                 break
+            except (ExecutionAuthorizationError, PermissionError):
+                raise
             except Exception as e:
                 err_str = str(e)
                 if "NOGROUP" in err_str or "no such consumer group" in err_str.lower():
@@ -204,6 +211,8 @@ class EventPersistenceBridge:
                 async with self._persist_semaphore:
                     await self._persist_normalized_event(msg)
                 return True
+            except (ExecutionAuthorizationError, PermissionError):
+                raise
             except Exception as e:
                 last_error = e
                 if attempt < max_retries:

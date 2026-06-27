@@ -14,6 +14,7 @@ from app.services.execution.execution_service import ExecutionService
 from app.services.integrity_service import IntegrityService
 from app.services.safety_service import SafetyService
 from app.core.exceptions import TradeExecutionError, MarketNotFoundError
+from app.services.execution.governance.execution_governor import ExecutionAuthorizationError
 import json
 
 
@@ -84,6 +85,8 @@ class TradeService:
                 remote_state = json.loads(remote_state_raw)
                 if not remote_state.get("tradingEnabled", True):
                     raise TradeExecutionError("Trading disabled by remote control.")
+        except (ExecutionAuthorizationError, PermissionError):
+            raise
         except Exception as e:
             logger.critical("state_store_unavailable_trading_halted", error=str(e))
             raise SystemHaltException(
@@ -292,6 +295,8 @@ class TradeService:
             try:
                 await self.close_trade(trade.id)
                 count += 1
+            except (ExecutionAuthorizationError, PermissionError):
+                raise
             except Exception as e:
                 logger.error("failed_to_close_position_in_bulk", trade_id=str(trade.id), error=str(e))
         await self.db.flush()
