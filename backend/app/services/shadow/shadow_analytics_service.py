@@ -1,5 +1,6 @@
 import math
 import json
+import asyncio
 from datetime import datetime, timezone
 from typing import Any
 
@@ -82,7 +83,7 @@ class ShadowAnalyticsService:
             filtered.append(e)
         return filtered
 
-    def _compute_strategy_analytics(
+    async def _compute_strategy_analytics(
         self, executions: list[ShadowExecution], strategy: str
     ) -> StrategyAnalytics:
         strat_execs = [e for e in executions if e.strategy == strategy]
@@ -190,7 +191,7 @@ class ShadowAnalyticsService:
 
         await self._load()
         filtered = self._filter_by_date(self._executions, start, end)
-        result = self._compute_strategy_analytics(filtered, strategy)
+        result = await self._compute_strategy_analytics(filtered, strategy)
         await self._set_cache(cache_key, result.model_dump())
         return result
 
