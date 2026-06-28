@@ -17,7 +17,12 @@ class OutcomeClosureEngine:
     def __init__(self, db: AsyncSession):
         self.db = db
 
-    async def resolve_decision(self, decision_id: UUID, resolution_price: float) -> OutcomeReceipt:
+    async def resolve_decision(
+        self,
+        decision_id: UUID,
+        resolution_price: float,
+        resolution_source: str = "manual"
+    ) -> OutcomeReceipt:
         """
         When market outcome becomes available: resolve decision, compute metrics, and return receipt.
         """
@@ -52,15 +57,29 @@ class OutcomeClosureEngine:
         # Since we are resolving one decision, actual_win_rate is outcome_val
         calibration_delta = (log_entry.predicted_probability or 0.0) - outcome_val
 
+        now = datetime.now(timezone.utc)
         receipt = OutcomeReceipt(
             decision_id=decision_id,
-            timestamp=datetime.now(timezone.utc),
+            timestamp=now,
             realized_ev=realized_ev,
             win_loss=win_loss,
             calibration_delta=calibration_delta,
             prediction_error=prediction_error,
             resolution_price=resolution_price
         )
+
+        # Update log entry
+        log_entry.realized_ev = realized_ev
+        log_entry.actual_ev = realized_ev
+        log_entry.simulated_exit_price = resolution_price
+        log_entry.outcome_timestamp = now
+        log_entry.market_resolution_source = resolution_source
+        # Transition OPEN -> CLOSED -> RESOLVED
+        log_entry.decision_status = "CLOSED"
+        await self.db.flush()
+
+        log_entry.decision_status = "RESOLVED"
+        await self.db.flush()
 
         logger.info("shadow_decision_resolved",
                     decision_id=str(decision_id),

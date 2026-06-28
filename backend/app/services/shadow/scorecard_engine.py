@@ -58,6 +58,7 @@ class ScorecardEngine:
         # Build Aggregate Query
         query = select(
             func.count(ShadowDecisionLog.id).label("total_decisions"),
+            func.sum(case((ShadowDecisionLog.decision_status == "RESOLVED", 1), else_=0)).label("total_resolved"),
             func.sum(case((ShadowDecisionLog.simulated_exit_price.isnot(None), 1), else_=0)).label("total_closed"),
             func.sum(ShadowDecisionLog.actual_ev).label("sum_realized_ev"),
             func.sum(ShadowDecisionLog.expected_ev).label("sum_expected_ev"),
@@ -94,6 +95,7 @@ class ScorecardEngine:
             return ScorecardMetrics()
 
         total_decisions = row.total_decisions
+        total_resolved = row.total_resolved or 0
         total_closed = row.total_closed or 0
         sum_realized_ev = row.sum_realized_ev or 0.0
         sum_expected_ev = row.sum_expected_ev or 0.0
@@ -114,13 +116,23 @@ class ScorecardEngine:
         # For precision, let's do a sub-query for variance if conf_count > 1
         confidence_drift = 0.0
         if row.conf_count and row.conf_count > 1:
-            var_query = select(func.variance(ShadowDecisionLog.confidence)).where(*filters)
-            var_res = await self.db.execute(var_query)
-            variance = var_res.scalar() or 0.0
-            confidence_drift = variance ** 0.5
+            try:
+                # Use variance if supported (PostgreSQL), fallback to manual for SQLite
+                var_query = select(func.variance(ShadowDecisionLog.confidence)).where(*filters)
+                var_res = await self.db.execute(var_query)
+                variance = var_res.scalar() or 0.0
+                confidence_drift = variance ** 0.5
+            except Exception:
+                # Manual calculation for SQLite or other dialects lacking variance()
+                avg_conf = row.avg_confidence or 0.0
+                drift_query = select(func.sum(func.pow(ShadowDecisionLog.confidence - avg_conf, 2))).where(*filters)
+                drift_res = await self.db.execute(drift_query)
+                sum_sq_diff = drift_res.scalar() or 0.0
+                variance = sum_sq_diff / (row.conf_count - 1)
+                confidence_drift = variance ** 0.5
 
         return ScorecardMetrics(
-            decision_count=total_decisions,
+            decision_count=total_resolved, # Count only resolved for promotion volume
             realized_ev=sum_realized_ev,
             expected_ev=sum_expected_ev,
             alpha=alpha,
