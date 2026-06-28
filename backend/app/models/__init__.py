@@ -20,6 +20,7 @@ from .benchmark_price import BenchmarkPrice
 from .exchange_order import ExchangeOrder
 from .fill import Fill
 from .shadow_decision_log import ShadowDecisionLog
+from .decision_explanation import DecisionExplanation
 from .shadow_validation_snapshot import ShadowValidationSnapshot
 from .smart_wallet import SmartWallet
 from .wallet_trade import SolanaWalletTrade
@@ -59,6 +60,7 @@ __all__ = [
     "ExchangeOrder",
     "Fill",
     "ShadowDecisionLog",
+    "DecisionExplanation",
     "ShadowValidationSnapshot",
     "SmartWallet",
     "SolanaWalletTrade",
