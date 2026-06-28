@@ -1,17 +1,17 @@
 # PROMOTION_EVIDENCE_REPORT
-Generated at: 2026-06-28T13:48:35.696391
+Generated at: 2026-06-28T14:55:43.614057
 
 ## Global Evidence (Source Consistent)
-- **Snapshot Hash**: c71a39a31beab20375f02af178e48f295894434a183b760ad3bbd2bf4187b768
-- **Decision Count**: 0
+- **Snapshot Hash**: 95fffd10e1d2b5b2fb2999ebdcde9447021bb15d3ba36a80548c5cdf9f00d07d
+- **Resolved Decision Count**: 1
 - **Replay Parity**: 100.0000%
-- **Realized EV**: 0.0000
-- **Brier Score**: 1.0000
+- **Realized EV**: 10.0000
+- **Brier Score**: 0.0400
 
 ## Strategy Evidence Mapping
 | Strategy | Status | Snapshot Hash | Source Consistent |
 |----------|--------|---------------|-------------------|
-| test_strat | NOT_READY | 50de3d6d3c44c81cd71cefc8d8714d92130a9dc72979b817b2a7746cc5d51243 | TRUE |
+| strat | NOT_READY | 9905af9a8f28d9633dbca1cda8cb640a9d503043ce45b3179c27060812a7e138 | TRUE |
 
 ## Validation
 - **Source Consistent**: TRUE (All reports derive from single EvidenceEngine snapshots)

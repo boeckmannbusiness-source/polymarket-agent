@@ -92,14 +92,21 @@ Status: **{audit['status']}**
         metrics = audit['metrics']
         thresholds = audit['thresholds']
 
+        def fmt_metric(val: float, fmt: str, count: int) -> str:
+            if count == 0:
+                return "NOT_AVAILABLE"
+            if fmt == "pct":
+                return f"{val:.2%}"
+            return f"{val:.4f}"
+
         report_md += f"""
 ## Key Metrics
 | Metric | Value | Threshold | Result |
 |--------|-------|-----------|--------|
-| Decision Count | {metrics['decision_count']} | {thresholds.get('min_decisions', 500)} | {"PASS" if metrics['decision_count'] >= thresholds.get('min_decisions', 500) else "FAIL"} |
-| Replay Parity | {metrics['replay_parity']:.2%} | {thresholds.get('min_replay_parity', 0.95):.0%} | {"PASS" if metrics['replay_parity'] >= thresholds.get('min_replay_parity', 0.95) else "FAIL"} |
-| Realized EV | {metrics['realized_ev']:.4f} | > 0.0000 | {"PASS" if metrics['realized_ev'] > 0 else "FAIL"} |
-| Brier Score | {metrics['brier_score']:.4f} | ≤ {thresholds.get('max_brier_score', 0.25)} | {"PASS" if metrics['brier_score'] <= thresholds.get('max_brier_score', 0.25) else "FAIL"} |
+| Resolved Decision Count | {metrics['decision_count']} | {thresholds.get('min_decisions', 500)} | {"PASS" if metrics['decision_count'] >= thresholds.get('min_decisions', 500) else "FAIL"} |
+| Replay Parity | {fmt_metric(metrics['replay_parity'], "pct", metrics['decision_count'])} | {thresholds.get('min_replay_parity', 0.95):.0%} | {"PASS" if metrics['decision_count'] > 0 and metrics['replay_parity'] >= thresholds.get('min_replay_parity', 0.95) else "FAIL"} |
+| Realized EV | {fmt_metric(metrics['realized_ev'], "num", metrics['decision_count'])} | > 0.0000 | {"PASS" if metrics['decision_count'] > 0 and metrics['realized_ev'] > 0 else "FAIL"} |
+| Brier Score | {fmt_metric(metrics['brier_score'], "num", metrics['decision_count'])} | ≤ {thresholds.get('max_brier_score', 0.25)} | {"PASS" if metrics['decision_count'] > 0 and metrics['brier_score'] <= thresholds.get('max_brier_score', 0.25) else "FAIL"} |
 | Data Origin | {metrics['data_origin']} | shadow | {"PASS" if metrics['data_origin'] == "shadow" else "FAIL"} |
 
 """

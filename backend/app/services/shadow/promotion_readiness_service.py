@@ -31,23 +31,41 @@ class PromotionReadinessService:
         snapshot = await self.evidence_engine.generate_snapshot(strategy_id)
         audit = await self.audit_service.audit_strategy(strategy_id, snapshot=snapshot)
 
-        status = ReadinessStatus.NOT_STARTED
+        # Check for awaiting resolution
+        total_in_db_query = select(func.count(ShadowDecisionLog.id))
+        if strategy_id and strategy_id != "GLOBAL":
+            total_in_db_query = total_in_db_query.where(ShadowDecisionLog.strategy_id == strategy_id)
 
-        if snapshot.decision_count == 0:
+        total_in_db_res = await self.db.execute(total_in_db_query)
+        total_in_db = total_in_db_res.scalar() or 0
+
+        status = ReadinessStatus.NOT_STARTED
+        reason = "NO_DECISIONS"
+
+        if total_in_db == 0:
             status = ReadinessStatus.NOT_STARTED
+            reason = "NO_DECISIONS"
+        elif snapshot.decision_count == 0:
+            status = ReadinessStatus.COLLECTING
+            reason = "AWAITING_RESOLUTION"
         elif snapshot.decision_count < 100: # Arbitrary threshold for COLLECTING
             status = ReadinessStatus.COLLECTING
+            reason = "INSUFFICIENT_VOLUME"
         elif snapshot.decision_count < 500:
             status = ReadinessStatus.INSUFFICIENT_VOLUME
+            reason = "INSUFFICIENT_VOLUME"
         else:
             if audit["status"] == "READY":
                 status = ReadinessStatus.READY
+                reason = "READY"
             else:
                 status = ReadinessStatus.EVALUATING
+                reason = "FAILED_POLICY"
 
         return {
             "strategy_id": strategy_id,
             "readiness_status": status.value,
+            "readiness_reason": reason,
             "decision_count": snapshot.decision_count,
             "blocking_reasons": audit["reasons"],
             "data_origin": snapshot.data_origin,

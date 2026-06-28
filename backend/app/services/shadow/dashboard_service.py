@@ -61,6 +61,13 @@ class DashboardService:
 
         # 3. Build Markdown
         timestamp = datetime.now().isoformat()
+        def fmt_metric(val: float, fmt: str, count: int) -> str:
+            if count == 0:
+                return "NOT_AVAILABLE"
+            if fmt == "pct":
+                return f"{val:.2%}"
+            return f"{val:.4f}"
+
         report_md = f"""# SHADOW_OPERATIONS_REPORT
 Generated at: {timestamp}
 Global Snapshot Hash: {global_snapshot.snapshot_hash}
@@ -68,10 +75,10 @@ Global Snapshot Hash: {global_snapshot.snapshot_hash}
 ## Throughput & Health
 | Metric | Value |
 |--------|-------|
-| Total Decisions | {global_snapshot.decision_count} |
-| Global Replay Parity | {global_snapshot.replay_parity:.2%} |
-| Global Brier Score | {global_snapshot.brier_score:.4f} |
-| Total Realized EV | {global_snapshot.realized_ev:.4f} |
+| Total Resolved Decisions | {global_snapshot.decision_count} |
+| Global Replay Parity | {fmt_metric(global_snapshot.replay_parity, "pct", global_snapshot.decision_count)} |
+| Global Brier Score | {fmt_metric(global_snapshot.brier_score, "num", global_snapshot.decision_count)} |
+| Total Realized EV | {fmt_metric(global_snapshot.realized_ev, "num", global_snapshot.decision_count)} |
 
 ## Strategy Rankings
 | Strategy | Status | Realized EV | Stability Issues | Snapshot Hash |
@@ -104,15 +111,22 @@ Global Snapshot Hash: {global_snapshot.snapshot_hash}
         Generates PROMOTION_EVIDENCE_REPORT.md to ensure reproducible promotion decisions.
         """
         timestamp = datetime.now().isoformat()
+        def fmt_metric(val: float, fmt: str, count: int) -> str:
+            if count == 0:
+                return "NOT_AVAILABLE"
+            if fmt == "pct":
+                return f"{val:.4%}"
+            return f"{val:.4f}"
+
         report_md = f"""# PROMOTION_EVIDENCE_REPORT
 Generated at: {timestamp}
 
 ## Global Evidence (Source Consistent)
 - **Snapshot Hash**: {global_snapshot.snapshot_hash}
-- **Decision Count**: {global_snapshot.decision_count}
-- **Replay Parity**: {global_snapshot.replay_parity:.4%}
-- **Realized EV**: {global_snapshot.realized_ev:.4f}
-- **Brier Score**: {global_snapshot.brier_score:.4f}
+- **Resolved Decision Count**: {global_snapshot.decision_count}
+- **Replay Parity**: {fmt_metric(global_snapshot.replay_parity, "pct", global_snapshot.decision_count)}
+- **Realized EV**: {fmt_metric(global_snapshot.realized_ev, "num", global_snapshot.decision_count)}
+- **Brier Score**: {fmt_metric(global_snapshot.brier_score, "num", global_snapshot.decision_count)}
 
 ## Strategy Evidence Mapping
 | Strategy | Status | Snapshot Hash | Source Consistent |
@@ -137,9 +151,17 @@ Generated at: {timestamp}
         from app.models.shadow_decision_log import ShadowDecisionLog
 
         # Metrics
+        total_query = select(func.count(ShadowDecisionLog.id))
+        total_res = await self.db.execute(total_query)
+        total_decisions = total_res.scalar() or 0
+
         backlog_query = select(func.count(ShadowDecisionLog.id)).where(ShadowDecisionLog.decision_status == "OPEN")
         backlog_res = await self.db.execute(backlog_query)
         open_backlog = backlog_res.scalar() or 0
+
+        closed_query = select(func.count(ShadowDecisionLog.id)).where(ShadowDecisionLog.decision_status == "CLOSED")
+        closed_res = await self.db.execute(closed_query)
+        closed_count = closed_res.scalar() or 0
 
         # Resolution Latency (avg time between created_at and outcome_timestamp)
         latency_query = select(
@@ -163,17 +185,34 @@ Generated at: {timestamp}
 
         timestamp = datetime.now().isoformat()
 
+        def fmt_metric(val: float, fmt: str, count: int) -> str:
+            if count == 0:
+                return "NOT_AVAILABLE"
+            if fmt == "pct":
+                return f"{val:.4%}"
+            return f"{val:.4f}"
+
         report_md = f"""# SHADOW_HEALTH_REPORT
 Generated at: {timestamp}
+
+## Population Consistency
+Definition: Total = OPEN + CLOSED + RESOLVED
+
+| Metric | Value |
+|--------|-------|
+| Total Decisions | {total_decisions} |
+| OPEN (Backlog) | {open_backlog} |
+| CLOSED (Awaiting Resolution) | {closed_count} |
+| RESOLVED (Throughput) | {global_snapshot.decision_count} |
 
 ## Operational Metrics
 | Metric | Value |
 |--------|-------|
-| Decision Throughput (Total) | {global_snapshot.decision_count} |
+| Resolved Decision Throughput | {global_snapshot.decision_count} |
 | Open Backlog | {open_backlog} |
 | Resolution Latency (avg hrs) | {avg_latency_hours:.2f} |
-| Replay Parity | {global_snapshot.replay_parity:.4%} |
-| Confidence Calibration | {global_snapshot.brier_score:.4f} |
+| Replay Parity | {fmt_metric(global_snapshot.replay_parity, "pct", global_snapshot.decision_count)} |
+| Confidence Calibration | {fmt_metric(global_snapshot.brier_score, "num", global_snapshot.decision_count)} |
 | Strategy Count | {strategy_count} |
 | Evidence Origin | {global_snapshot.data_origin} |
 
