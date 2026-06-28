@@ -740,8 +740,9 @@ class ExecutionService:
                     admission_hash = intent.metadata["admission_receipt_hash"]
 
             gov_decision = authorization.decision if authorization else "UNKNOWN"
-            cert_version = "8.1" # Sprint version
+            cert_version = "8.3" # Sprint version
             cert_snapshot_hash = (intent.metadata or {}).get("certification_snapshot_hash") if intent else None
+            execution_id = getattr(result, "execution_id", getattr(result, "id", str(uuid.uuid4())))
 
             await ledger.record_decision(
                 market_id=market_id,
@@ -760,6 +761,9 @@ class ExecutionService:
                 certification_version=cert_version,
                 certification_snapshot_hash=cert_snapshot_hash,
                 approval_reason=authorization.reason if authorization else None,
+                predicted_direction=intent.side if intent else None,
+                execution_hash=str(execution_id),
+                snapshot_hash=cert_snapshot_hash,
             )
 
         except Exception as e:

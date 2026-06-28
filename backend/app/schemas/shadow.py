@@ -112,5 +112,6 @@ class PromotionEvidenceSnapshot(BaseModel):
     realized_ev: float
     brier_score: float
     certification_violations: int
+    data_origin: str = "synthetic"  # synthetic, shadow, replay
     timestamp: datetime = Field(default_factory=datetime.now)
     snapshot_hash: str | None = None

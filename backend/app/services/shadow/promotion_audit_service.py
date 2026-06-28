@@ -52,6 +52,10 @@ class PromotionAuditService:
         if snapshot.certification_violations > 0:
             blocking_reasons.append(f"Certification violations detected: {snapshot.certification_violations}")
 
+        # 6. Evidence Origin Enforcement (Sprint 8.3)
+        if snapshot.data_origin != "shadow":
+            blocking_reasons.append(f"Promotion requires real shadow evidence: current origin is {snapshot.data_origin}")
+
         # Explicit status aggregation
         status = "READY" if not blocking_reasons else "NOT_READY"
 
@@ -96,6 +100,7 @@ Status: **{audit['status']}**
 | Replay Parity | {metrics['replay_parity']:.2%} | {thresholds.get('min_replay_parity', 0.95):.0%} | {"PASS" if metrics['replay_parity'] >= thresholds.get('min_replay_parity', 0.95) else "FAIL"} |
 | Realized EV | {metrics['realized_ev']:.4f} | > 0.0000 | {"PASS" if metrics['realized_ev'] > 0 else "FAIL"} |
 | Brier Score | {metrics['brier_score']:.4f} | ≤ {thresholds.get('max_brier_score', 0.25)} | {"PASS" if metrics['brier_score'] <= thresholds.get('max_brier_score', 0.25) else "FAIL"} |
+| Data Origin | {metrics['data_origin']} | shadow | {"PASS" if metrics['data_origin'] == "shadow" else "FAIL"} |
 
 """
         # Save to file

@@ -1,21 +1,19 @@
-# SHADOW_OPERATIONS_REPORT (SYNTHETIC VALIDATION)
-Generated at: 2026-06-28T08:05:16.142289
-Global Snapshot Hash: global_hash
-
-**NOTICE**: This report contains synthetic data generated for pipeline validation purposes. It does not reflect real shadow execution performance.
+# SHADOW_OPERATIONS_REPORT
+Generated at: 2026-06-28T13:48:35.696145
+Global Snapshot Hash: c71a39a31beab20375f02af178e48f295894434a183b760ad3bbd2bf4187b768
 
 ## Throughput & Health
 | Metric | Value |
 |--------|-------|
-| Total Decisions | 1000 |
-| Global Replay Parity | 98.00% |
-| Global Brier Score | 0.1000 |
-| Total Realized EV | 100.0000 |
+| Total Decisions | 0 |
+| Global Replay Parity | 100.00% |
+| Global Brier Score | 1.0000 |
+| Total Realized EV | 0.0000 |
 
 ## Strategy Rankings
 | Strategy | Status | Realized EV | Stability Issues | Snapshot Hash |
 |----------|--------|-------------|------------------|---------------|
-| strat1 | VALIDATED | 50.0000 | 0 | strat_hash |
+| test_strat | NOT_READY | 0.0000 | 0 | 50de3d6d3c44c81cd71cefc8d8714d92130a9dc72979b817b2a7746cc5d51243 |
 
 ## Certification Health
 | Invariant | Violations | Status |

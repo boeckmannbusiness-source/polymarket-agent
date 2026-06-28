@@ -34,6 +34,24 @@ class EvidenceEngine:
         cert_res = await self.db.execute(cert_query)
         cert_violations = cert_res.scalar() or 0
 
+        # Determine data origin
+        data_origin = "synthetic"
+
+        # Check if we have ANY decisions in the DB (real or unresolved)
+        from app.models.shadow_decision_log import ShadowDecisionLog
+        count_query = select(func.count(ShadowDecisionLog.id))
+        if strategy_id and strategy_id != "GLOBAL":
+            count_query = count_query.where(ShadowDecisionLog.strategy_id == strategy_id)
+
+        count_res = await self.db.execute(count_query)
+        total_in_db = count_res.scalar() or 0
+
+        if total_in_db > 0:
+            # If we have decisions, check if they are real shadow decisions
+            # For Sprint 8.3, we assume if they are in the DB they are real shadow data
+            # unless explicitly marked otherwise (e.g. in tests)
+            data_origin = "shadow"
+
         snapshot = PromotionEvidenceSnapshot(
             strategy_id=strategy_id or "GLOBAL",
             decision_count=metrics.decision_count,
@@ -41,6 +59,7 @@ class EvidenceEngine:
             realized_ev=metrics.realized_ev,
             brier_score=metrics.brier_score,
             certification_violations=cert_violations,
+            data_origin=data_origin,
             timestamp=datetime.now()
         )
 

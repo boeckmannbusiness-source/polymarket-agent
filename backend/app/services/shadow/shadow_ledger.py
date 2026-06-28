@@ -40,6 +40,9 @@ class ShadowLedger:
         admission_receipt_hash: Optional[str] = None,
         governor_decision: Optional[str] = None,
         certification_snapshot_hash: Optional[str] = None,
+        predicted_direction: Optional[str] = None,
+        execution_hash: Optional[str] = None,
+        snapshot_hash: Optional[str] = None,
     ) -> ShadowDecisionLog:
         """
         Records a shadow decision in the ledger.
@@ -55,9 +58,13 @@ class ShadowLedger:
             simulated_size=simulated_size,
             simulated_entry_price=simulated_entry_price,
             expected_ev=expected_ev,
+            predicted_direction=predicted_direction,
             predicted_probability=predicted_probability,
+            execution_hash=execution_hash,
             replay_hash=replay_hash,
             replay_match=replay_match,
+            snapshot_hash=snapshot_hash,
+            decision_status="OPEN",
             admission_receipt_hash=admission_receipt_hash,
             governor_decision=governor_decision,
             certification_version=certification_version,
@@ -70,8 +77,7 @@ class ShadowLedger:
         )
 
         self.db.add(log_entry)
-        await self.db.commit()
-        await self.db.refresh(log_entry)
+        await self.db.flush()
 
         logger.info(
             "shadow_decision_recorded",
@@ -97,10 +103,12 @@ class ShadowLedger:
 
         log_entry.simulated_exit_price = receipt.resolution_price
         log_entry.actual_ev = receipt.realized_ev
+        log_entry.realized_ev = receipt.realized_ev
+        log_entry.outcome_timestamp = receipt.timestamp
+        log_entry.decision_status = "RESOLVED"
         # We could add more fields to model if needed, but these are core for now.
 
-        await self.db.commit()
-        await self.db.refresh(log_entry)
+        await self.db.flush()
 
         logger.info(
             "shadow_outcome_stored",
@@ -129,9 +137,10 @@ class ShadowLedger:
 
         log_entry.simulated_exit_price = simulated_exit_price
         log_entry.actual_ev = actual_ev
+        log_entry.realized_ev = actual_ev
+        log_entry.decision_status = "RESOLVED"
 
-        await self.db.commit()
-        await self.db.refresh(log_entry)
+        await self.db.flush()
 
         logger.info(
             "shadow_outcome_updated",
