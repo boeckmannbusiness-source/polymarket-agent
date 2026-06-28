@@ -7,6 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 
 from app.models.shadow_decision_log import ShadowDecisionLog
+from app.domain.shadow.models import OutcomeReceipt
 from app.core.logging import logger
 
 class ShadowLedger:
@@ -35,6 +36,10 @@ class ShadowLedger:
         regime_confidence: Optional[float] = None,
         approval_reason: Optional[str] = None,
         rejection_reason: Optional[str] = None,
+        predicted_probability: Optional[float] = None,
+        admission_receipt_hash: Optional[str] = None,
+        governor_decision: Optional[str] = None,
+        certification_snapshot_hash: Optional[str] = None,
     ) -> ShadowDecisionLog:
         """
         Records a shadow decision in the ledger.
@@ -50,9 +55,13 @@ class ShadowLedger:
             simulated_size=simulated_size,
             simulated_entry_price=simulated_entry_price,
             expected_ev=expected_ev,
+            predicted_probability=predicted_probability,
             replay_hash=replay_hash,
             replay_match=replay_match,
+            admission_receipt_hash=admission_receipt_hash,
+            governor_decision=governor_decision,
             certification_version=certification_version,
+            certification_snapshot_hash=certification_snapshot_hash,
             certification_violation=certification_violation,
             regime=regime,
             regime_confidence=regime_confidence,
@@ -70,6 +79,33 @@ class ShadowLedger:
             market_id=market_id,
             strategy_id=strategy_id,
             decision=decision
+        )
+        return log_entry
+
+    async def store_outcome_receipt(self, receipt: OutcomeReceipt) -> Optional[ShadowDecisionLog]:
+        """
+        Updates a shadow decision with its OutcomeReceipt.
+        """
+        result = await self.db.execute(
+            select(ShadowDecisionLog).where(ShadowDecisionLog.id == receipt.decision_id)
+        )
+        log_entry = result.scalar_one_or_none()
+
+        if not log_entry:
+            logger.warning("shadow_decision_not_found", decision_id=str(receipt.decision_id))
+            return None
+
+        log_entry.simulated_exit_price = receipt.resolution_price
+        log_entry.actual_ev = receipt.realized_ev
+        # We could add more fields to model if needed, but these are core for now.
+
+        await self.db.commit()
+        await self.db.refresh(log_entry)
+
+        logger.info(
+            "shadow_outcome_stored",
+            decision_id=str(log_entry.id),
+            actual_ev=receipt.realized_ev
         )
         return log_entry
 
