@@ -1,4 +1,4 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from datetime import datetime
 from typing import Any
 
@@ -73,3 +73,44 @@ class PromotionThresholds(BaseModel):
 class AnalyticsCache(BaseModel):
     data: dict[str, Any]
     cached_at: float
+
+
+class ScorecardMetrics(BaseModel):
+    decision_count: int = 0
+    realized_ev: float = 0.0
+    expected_ev: float = 0.0
+    alpha: float = 0.0
+    win_rate: float = 0.0
+    brier_score: float = 1.0
+    replay_parity: float = 0.0
+    rejection_rate: float = 0.0
+    calibration_error: float = 0.0
+    confidence_drift: float = 0.0
+
+
+class StrategyScorecard(BaseModel):
+    strategy_id: str
+    global_metrics: ScorecardMetrics
+    rolling_7d: ScorecardMetrics
+    rolling_30d: ScorecardMetrics
+    generated_at: datetime = Field(default_factory=datetime.now)
+
+
+class StabilityReceipt(BaseModel):
+    strategy_id: str
+    severity: str  # LOW, MEDIUM, HIGH, CRITICAL
+    metric: str
+    message: str
+    evidence: dict[str, Any]
+    detection_time: datetime = Field(default_factory=datetime.now)
+
+
+class PromotionEvidenceSnapshot(BaseModel):
+    strategy_id: str
+    decision_count: int
+    replay_parity: float
+    realized_ev: float
+    brier_score: float
+    certification_violations: int
+    timestamp: datetime = Field(default_factory=datetime.now)
+    snapshot_hash: str | None = None
