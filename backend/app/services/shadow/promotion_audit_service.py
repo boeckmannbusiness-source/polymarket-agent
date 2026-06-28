@@ -5,6 +5,8 @@ from datetime import datetime
 
 from app.services.shadow.scorecard_engine import ScorecardEngine
 from app.services.shadow.policy_parser import parse_promotion_policy
+from app.services.shadow.evidence_engine import EvidenceEngine
+from app.schemas.shadow import PromotionEvidenceSnapshot
 from app.core.logging import logger
 
 class PromotionAuditService:
@@ -14,74 +16,64 @@ class PromotionAuditService:
     def __init__(self, db: AsyncSession):
         self.db = db
         self.scorecard_engine = ScorecardEngine(db)
+        self.evidence_engine = EvidenceEngine(db)
 
-    async def audit_strategy(self, strategy_id: str) -> Dict[str, Any]:
+    async def audit_strategy(self, strategy_id: str, snapshot: Optional[PromotionEvidenceSnapshot] = None) -> Dict[str, Any]:
         """
-        Audits a specific strategy against the promotion policy.
+        Audits a specific strategy against the promotion policy using a snapshot.
         """
-        scorecard = await self.scorecard_engine.generate_scorecard(strategy_id)
+        if snapshot is None:
+            snapshot = await self.evidence_engine.generate_snapshot(strategy_id)
+
         thresholds = parse_promotion_policy()
 
-        metrics = scorecard.global_metrics
-
-        ready = True
-        reasons = []
+        blocking_reasons = []
 
         # 1. Decision Volume
         min_decisions = thresholds.get("min_decisions", 500)
-        if metrics.decision_count < min_decisions:
-            ready = False
-            reasons.append(f"Insufficient decision volume: {metrics.decision_count} < {min_decisions}")
+        if snapshot.decision_count < min_decisions:
+            blocking_reasons.append(f"Insufficient decision volume: {snapshot.decision_count} < {min_decisions}")
 
         # 2. Replay Parity
         min_parity = thresholds.get("min_replay_parity", 0.95)
-        if metrics.replay_parity < min_parity:
-            ready = False
-            reasons.append(f"Replay parity below threshold: {metrics.replay_parity:.2%} < {min_parity:.0%}")
+        if snapshot.replay_parity < min_parity:
+            blocking_reasons.append(f"Replay parity below threshold: {snapshot.replay_parity:.2%} < {min_parity:.0%}")
 
         # 3. Performance (EV)
-        if metrics.realized_ev <= 0:
-            ready = False
-            reasons.append(f"Positive realized EV required: {metrics.realized_ev:.4f}")
+        if snapshot.realized_ev <= 0:
+            blocking_reasons.append(f"Positive realized EV required: {snapshot.realized_ev:.4f}")
 
         # 4. Confidence Calibration (Brier Score)
         max_brier = thresholds.get("max_brier_score", 0.25)
-        if metrics.brier_score > max_brier:
-            ready = False
-            reasons.append(f"Confidence calibration unstable (Brier Score): {metrics.brier_score:.4f} > {max_brier}")
+        if snapshot.brier_score > max_brier:
+            blocking_reasons.append(f"Confidence calibration unstable (Brier Score): {snapshot.brier_score:.4f} > {max_brier}")
 
-        # Check for any certification violations
-        from sqlalchemy import select
-        from app.models.shadow_decision_log import ShadowDecisionLog
-        violation_query = select(ShadowDecisionLog).where(
-            ShadowDecisionLog.strategy_id == strategy_id,
-            ShadowDecisionLog.certification_violation == True
-        )
-        violation_result = await self.db.execute(violation_query)
-        violations = violation_result.scalars().all()
-        if violations:
-            ready = False
-            reasons.append(f"Certification violations detected: {len(violations)}")
+        # 5. Certification Integrity
+        if snapshot.certification_violations > 0:
+            blocking_reasons.append(f"Certification violations detected: {snapshot.certification_violations}")
 
-        status = "READY" if ready else "NOT_READY"
+        # Explicit status aggregation
+        status = "READY" if not blocking_reasons else "NOT_READY"
 
         return {
             "strategy_id": strategy_id,
             "status": status,
-            "reasons": reasons,
-            "metrics": metrics.model_dump(),
+            "reasons": blocking_reasons,
+            "metrics": snapshot.model_dump(),
             "thresholds": thresholds,
-            "timestamp": datetime.now().isoformat()
+            "timestamp": snapshot.timestamp.isoformat() if hasattr(snapshot.timestamp, 'isoformat') else str(snapshot.timestamp),
+            "snapshot_hash": snapshot.snapshot_hash
         }
 
-    async def generate_promotion_report(self, strategy_id: str) -> str:
+    async def generate_promotion_report(self, strategy_id: str, snapshot: Optional[PromotionEvidenceSnapshot] = None) -> str:
         """
-        Generates a markdown promotion report for a strategy.
+        Generates a markdown promotion report for a strategy using a snapshot.
         """
-        audit = await self.audit_strategy(strategy_id)
+        audit = await self.audit_strategy(strategy_id, snapshot=snapshot)
 
         report_md = f"""# PROMOTION_REPORT: {strategy_id}
 Generated at: {audit['timestamp']}
+Snapshot Hash: {audit['snapshot_hash']}
 Status: **{audit['status']}**
 
 ## Policy Evaluation

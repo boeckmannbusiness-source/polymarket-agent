@@ -1,4 +1,4 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from datetime import datetime
 from typing import Any
 
@@ -93,7 +93,7 @@ class StrategyScorecard(BaseModel):
     global_metrics: ScorecardMetrics
     rolling_7d: ScorecardMetrics
     rolling_30d: ScorecardMetrics
-    generated_at: datetime = datetime.now()
+    generated_at: datetime = Field(default_factory=datetime.now)
 
 
 class StabilityReceipt(BaseModel):
@@ -102,4 +102,15 @@ class StabilityReceipt(BaseModel):
     metric: str
     message: str
     evidence: dict[str, Any]
-    detection_time: datetime = datetime.now()
+    detection_time: datetime = Field(default_factory=datetime.now)
+
+
+class PromotionEvidenceSnapshot(BaseModel):
+    strategy_id: str
+    decision_count: int
+    replay_parity: float
+    realized_ev: float
+    brier_score: float
+    certification_violations: int
+    timestamp: datetime = Field(default_factory=datetime.now)
+    snapshot_hash: str | None = None
