@@ -1,6 +1,8 @@
-# SHADOW_OPERATIONS_REPORT
+# SHADOW_OPERATIONS_REPORT (SYNTHETIC VALIDATION)
 Generated at: 2026-06-28T08:05:16.142289
 Global Snapshot Hash: global_hash
+
+**NOTICE**: This report contains synthetic data generated for pipeline validation purposes. It does not reflect real shadow execution performance.
 
 ## Throughput & Health
 | Metric | Value |
@@ -13,7 +15,7 @@ Global Snapshot Hash: global_hash
 ## Strategy Rankings
 | Strategy | Status | Realized EV | Stability Issues | Snapshot Hash |
 |----------|--------|-------------|------------------|---------------|
-| strat1 | READY | 50.0000 | 0 | strat_hash |
+| strat1 | VALIDATED | 50.0000 | 0 | strat_hash |
 
 ## Certification Health
 | Invariant | Violations | Status |
