@@ -22,6 +22,7 @@ async def test_policy_threshold_enforcement(mock_db):
         realized_ev=10.0,
         brier_score=0.15,
         certification_violations=0,
+        data_origin="shadow",
         timestamp=now,
         snapshot_hash="ready_hash"
     )
@@ -53,7 +54,8 @@ async def test_not_ready_reason_generation(mock_db):
 
     audit = await service.audit_strategy("strat1")
     assert audit["status"] == "NOT_READY"
-    assert len(audit["reasons"]) == 5
+    # Origin synthetic + its reject reason adds 2 more
+    assert len(audit["reasons"]) == 7
     assert any("Insufficient decision volume" in r for r in audit["reasons"])
     assert any("Replay parity below threshold" in r for r in audit["reasons"])
     assert any("Positive realized EV required" in r for r in audit["reasons"])
@@ -70,7 +72,7 @@ async def test_policy_reload(mock_db):
         now = datetime.now()
         snapshot = PromotionEvidenceSnapshot(
             strategy_id="s1", decision_count=600, replay_parity=0.98, realized_ev=10.0,
-            brier_score=0.1, certification_violations=0, timestamp=now, snapshot_hash="h"
+            brier_score=0.1, certification_violations=0, data_origin="shadow", timestamp=now, snapshot_hash="h"
         )
         service.evidence_engine.generate_snapshot = AsyncMock(return_value=snapshot)
 

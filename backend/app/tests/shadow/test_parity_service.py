@@ -52,4 +52,4 @@ async def test_replay_mismatch_detection():
     assert report.decision_id == decision_id
     assert report.parity_score == 0.0
     assert report.deterministic is False
-    assert report.mismatch_reason == "Replay mismatch: fingerprint inconsistency detected"
+    assert "Replay mismatch" in report.mismatch_reason

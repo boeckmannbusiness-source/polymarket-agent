@@ -1,6 +1,6 @@
 # PROMOTION_REPORT: empty_strat
-Generated at: 2026-06-28T14:55:43.209439
-Snapshot Hash: 371da9e073adb6f95b7f18542bd5b7316d10cf79998598d9e92eff978f897dfd
+Generated at: 2026-06-29T09:26:26.383776
+Snapshot Hash: 6a77fa59a3bc68a5d5817e187fe0332650c962541c579da81389e58e52d9a472
 Status: **NOT_READY**
 
 ## Policy Evaluation
@@ -10,6 +10,7 @@ Status: **NOT_READY**
 - Positive realized EV required: 0.0000
 - Confidence calibration unstable (Brier Score): 1.0000 > 0.25
 - Promotion requires real shadow evidence: current origin is synthetic
+- Origin 'synthetic' is strictly rejected for READY status.
 
 ## Key Metrics
 | Metric | Value | Threshold | Result |

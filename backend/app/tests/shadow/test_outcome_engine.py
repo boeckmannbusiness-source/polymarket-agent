@@ -15,6 +15,7 @@ async def test_outcome_resolution():
     decision_id = uuid.uuid4()
     log_entry = ShadowDecisionLog(
         id=decision_id,
+        decision_status="OPEN",
         simulated_entry_price=0.5,
         simulated_size=100.0,
         decision="buy",
@@ -49,6 +50,7 @@ async def test_ev_calculation():
     # Sell case
     log_entry = ShadowDecisionLog(
         id=decision_id,
+        decision_status="OPEN",
         simulated_entry_price=0.5,
         simulated_size=100.0,
         decision="sell",

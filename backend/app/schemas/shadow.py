@@ -112,6 +112,9 @@ class PromotionEvidenceSnapshot(BaseModel):
     realized_ev: float
     brier_score: float
     certification_violations: int
-    data_origin: str = "synthetic"  # synthetic, shadow, replay
+    data_origin: str = "synthetic"  # synthetic, shadow, replay, mixed
+    decision_ids: list[str] = Field(default_factory=list)
+    resolution_range: tuple[datetime | None, datetime | None] = (None, None)
+    source_tables: list[str] = Field(default_factory=lambda: ["shadow_decision_log"])
     timestamp: datetime = Field(default_factory=datetime.now)
     snapshot_hash: str | None = None

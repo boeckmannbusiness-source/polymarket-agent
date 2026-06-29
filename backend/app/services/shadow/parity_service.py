@@ -42,7 +42,17 @@ class ParityService:
         is_deterministic = log_entry.replay_match is True
 
         parity_score = 1.0 if is_deterministic else 0.0
-        mismatch_reason = None if is_deterministic else "Replay mismatch: fingerprint inconsistency detected"
+
+        # Classification logic (Sprint 8.4)
+        category = "UNKNOWN"
+        if parity_score == 1.0:
+            category = "EXACT"
+        elif parity_score >= 0.99:
+            category = "NUMERIC_DRIFT"
+        # In a real implementation, we would inspect the actual diff here.
+        # For now, we use the score as a proxy.
+
+        mismatch_reason = None if is_deterministic else f"Replay mismatch: {category} detected"
 
         # Prove determinism by checking the replay_match flag which was set during live execution
         # but re-verified here to ensure the pipeline is observable.
@@ -50,6 +60,7 @@ class ParityService:
         report = ReplayParityReport(
             decision_id=decision_id,
             parity_score=parity_score,
+            category=category,
             mismatch_reason=mismatch_reason,
             deterministic=log_entry.replay_match or False,
             reproduced_confidence=log_entry.confidence or 0.0,

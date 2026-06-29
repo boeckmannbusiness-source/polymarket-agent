@@ -52,9 +52,12 @@ class PromotionAuditService:
         if snapshot.certification_violations > 0:
             blocking_reasons.append(f"Certification violations detected: {snapshot.certification_violations}")
 
-        # 6. Evidence Origin Enforcement (Sprint 8.3)
+        # 6. Evidence Origin Enforcement (Sprint 8.4 Hardening)
         if snapshot.data_origin != "shadow":
             blocking_reasons.append(f"Promotion requires real shadow evidence: current origin is {snapshot.data_origin}")
+
+        if snapshot.data_origin in ["synthetic", "mixed"]:
+            blocking_reasons.append(f"Origin '{snapshot.data_origin}' is strictly rejected for READY status.")
 
         # Explicit status aggregation
         status = "READY" if not blocking_reasons else "NOT_READY"

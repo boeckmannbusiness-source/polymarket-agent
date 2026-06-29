@@ -1,6 +1,6 @@
 # PROMOTION_REPORT: strat
-Generated at: 2026-06-28T14:55:43.593364
-Snapshot Hash: 9905af9a8f28d9633dbca1cda8cb640a9d503043ce45b3179c27060812a7e138
+Generated at: 2026-06-29T09:26:26.690054
+Snapshot Hash: c7685c8e77b14c29b4c2fb4194b0c544022f9dbf8732e27137b287f0c45d1e39
 Status: **NOT_READY**
 
 ## Policy Evaluation

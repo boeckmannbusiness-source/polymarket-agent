@@ -70,4 +70,5 @@ async def test_dashboard_consistency(mock_db):
     service.evidence_engine.generate_snapshot = AsyncMock(return_value=global_snap)
 
     report = await service.generate_ops_report()
-    assert "Total Decisions | 0" in report
+    # Updated text to match SHADOW_OPERATIONS_REPORT
+    assert "Total Resolved Decisions | 0" in report

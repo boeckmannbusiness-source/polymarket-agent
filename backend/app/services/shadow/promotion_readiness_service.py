@@ -62,6 +62,47 @@ class PromotionReadinessService:
                 status = ReadinessStatus.EVALUATING
                 reason = "FAILED_POLICY"
 
+        # Task 4: Forecast logic
+        resolved_today = 0
+        rolling_7d = 0.0
+        eta_days = "UNKNOWN"
+
+        try:
+            from datetime import datetime, timedelta, timezone
+            now = datetime.now(timezone.utc)
+            today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+            seven_days_ago = today_start - timedelta(days=7)
+
+            today_query = select(func.count(ShadowDecisionLog.id)).where(
+                ShadowDecisionLog.decision_status == "RESOLVED",
+                ShadowDecisionLog.outcome_timestamp >= today_start
+            )
+            if strategy_id and strategy_id != "GLOBAL":
+                today_query = today_query.where(ShadowDecisionLog.strategy_id == strategy_id)
+
+            today_res = await self.db.execute(today_query)
+            resolved_today = today_res.scalar() or 0
+
+            seven_day_query = select(func.count(ShadowDecisionLog.id)).where(
+                ShadowDecisionLog.decision_status == "RESOLVED",
+                ShadowDecisionLog.outcome_timestamp >= seven_days_ago
+            )
+            if strategy_id and strategy_id != "GLOBAL":
+                seven_day_query = seven_day_query.where(ShadowDecisionLog.strategy_id == strategy_id)
+
+            seven_day_res = await self.db.execute(seven_day_query)
+            seven_day_count = seven_day_res.scalar() or 0
+            rolling_7d = seven_day_count / 7.0
+
+            if rolling_7d > 0:
+                remaining = 500 - snapshot.decision_count
+                if remaining <= 0:
+                    eta_days = 0
+                else:
+                    eta_days = round(remaining / rolling_7d, 1)
+        except Exception as e:
+            logger.error("forecast_calculation_failed", error=str(e))
+
         return {
             "strategy_id": strategy_id,
             "readiness_status": status.value,
@@ -69,5 +110,10 @@ class PromotionReadinessService:
             "decision_count": snapshot.decision_count,
             "blocking_reasons": audit["reasons"],
             "data_origin": snapshot.data_origin,
-            "snapshot_hash": snapshot.snapshot_hash
+            "snapshot_hash": snapshot.snapshot_hash,
+            "forecast": {
+                "resolved_today": resolved_today,
+                "rolling_7d": rolling_7d,
+                "estimated_days_to_500": eta_days
+            }
         }
