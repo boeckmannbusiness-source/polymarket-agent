@@ -1,4 +1,6 @@
 from typing import Dict, Any, List
+import hashlib
+import json
 from app.schemas.shadow import PromotionEvidenceSnapshot
 from app.core.logging import logger
 
@@ -35,6 +37,19 @@ class ReportIntegrityValidator:
              raise ReportIntegrityError(
                  f"Population mismatch: decision_count={snapshot.decision_count}, but decision_ids length={len(snapshot.decision_ids)}"
              )
+
+        # 4. Reconstruction Consistency (Sprint 8.4B)
+        recon_data = {
+            "decision_ids": [str(uid) for uid in snapshot.decision_ids],
+            "resolution_range": [ts.isoformat() if ts else None for ts in snapshot.resolution_range],
+            "source_tables": snapshot.source_tables
+        }
+        expected_recon_hash = hashlib.sha256(json.dumps(recon_data, sort_keys=True).encode()).hexdigest()
+
+        if snapshot.reconstruction_hash != expected_recon_hash:
+            raise ReportIntegrityError(
+                f"Reconstruction hash mismatch! Snapshot data does not match reconstruction_hash."
+            )
 
         return True
 

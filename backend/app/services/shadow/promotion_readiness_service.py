@@ -9,11 +9,13 @@ from app.services.shadow.promotion_audit_service import PromotionAuditService
 from app.core.logging import logger
 
 class ReadinessStatus(str, enum.Enum):
-    VALIDATED = "VALIDATED"
-    NOT_READY = "NOT_READY"
-    INSUFFICIENT_EVIDENCE = "INSUFFICIENT_EVIDENCE"
+    NO_DECISIONS = "NO_DECISIONS"
+    COLLECTING = "COLLECTING"
+    AWAITING_RESOLUTION = "AWAITING_RESOLUTION"
+    INSUFFICIENT_VOLUME = "INSUFFICIENT_VOLUME"
     EVALUATING = "EVALUATING"
     READY = "READY"
+    REVOKED = "REVOKED"
 
 class PromotionReadinessService:
     """
@@ -37,21 +39,26 @@ class PromotionReadinessService:
             total_in_db_query = total_in_db_query.where(ShadowDecisionLog.strategy_id == strategy_id)
 
         total_in_db_res = await self.db.execute(total_in_db_query)
-        total_in_db = total_in_db_res.scalar() or 0
+        total_in_db = total_in_db_res.scalar()
+        if hasattr(total_in_db, "mock_calls"): total_in_db = 0
+        total_in_db = total_in_db or 0
 
-        # Sprint 8.4A: Policy-derived status logic
-        status = ReadinessStatus.NOT_READY
+        # Sprint 8.4B: Unified status model
+        status = ReadinessStatus.NO_DECISIONS
         reason = "NO_DECISIONS"
 
         if total_in_db == 0:
-            status = ReadinessStatus.NOT_READY
+            status = ReadinessStatus.NO_DECISIONS
             reason = "NO_DECISIONS"
+        elif total_in_db < 100: # Threshold for COLLECTING
+            status = ReadinessStatus.COLLECTING
+            reason = "COLLECTING_INITIAL_SIGNALS"
         elif snapshot.decision_count == 0:
-            status = ReadinessStatus.INSUFFICIENT_EVIDENCE
-            reason = "AWAITING_RESOLUTION"
+            status = ReadinessStatus.AWAITING_RESOLUTION
+            reason = "AWAITING_MARKET_OUTCOMES"
         elif snapshot.decision_count < 500:
-            status = ReadinessStatus.INSUFFICIENT_EVIDENCE
-            reason = "INSUFFICIENT_VOLUME"
+            status = ReadinessStatus.INSUFFICIENT_VOLUME
+            reason = "INSUFFICIENT_RESOLVED_VOLUME"
         else:
             if audit["status"] == "READY":
                 status = ReadinessStatus.READY

@@ -113,7 +113,70 @@ Global Snapshot Hash: {global_snapshot.snapshot_hash}
         # Task 4: Generate Evidence Integrity Report
         await self._generate_evidence_integrity_report(global_snapshot, strategy_summaries)
 
+        # Task 2 (8.4B): Generate Explainability Report
+        await self._generate_explainability_report(strategies)
+
         return report_md
+
+    async def _generate_explainability_report(self, strategies: List[str]):
+        """
+        Generates PROMOTION_EXPLAINABILITY_REPORT.md with granular attribution.
+        """
+        from sqlalchemy import select, desc
+        from app.models.shadow_decision_log import ShadowDecisionLog
+        from app.services.shadow.promotion_readiness_service import PromotionReadinessService
+
+        readiness_service = PromotionReadinessService(self.db)
+        report_md = "# PROMOTION_EXPLAINABILITY_REPORT\n\n"
+
+        for strat_id in strategies:
+            state = await readiness_service.get_readiness_state(strat_id)
+            snapshot = await self.evidence_engine.generate_snapshot(strat_id)
+
+            # Fetch top contributors
+            top_pos_q = select(ShadowDecisionLog.id, ShadowDecisionLog.realized_ev).where(
+                ShadowDecisionLog.strategy_id == strat_id,
+                ShadowDecisionLog.decision_status == "RESOLVED"
+            ).order_by(desc(ShadowDecisionLog.realized_ev)).limit(5)
+
+            top_neg_q = select(ShadowDecisionLog.id, ShadowDecisionLog.realized_ev).where(
+                ShadowDecisionLog.strategy_id == strat_id,
+                ShadowDecisionLog.decision_status == "RESOLVED"
+            ).order_by(ShadowDecisionLog.realized_ev).limit(5)
+
+            pos_res = await self.db.execute(top_pos_q)
+            neg_res = await self.db.execute(top_neg_q)
+
+            top_pos = "\n".join([f"- {r[0]}: {r[1]:.4f}" for r in pos_res.all()]) or "None"
+            top_neg = "\n".join([f"- {r[0]}: {r[1]:.4f}" for r in neg_res.all()]) or "None"
+
+            win_start = snapshot.resolution_range[0].isoformat() if snapshot.resolution_range[0] else "N/A"
+            win_end = snapshot.resolution_range[1].isoformat() if snapshot.resolution_range[1] else "N/A"
+
+            report_md += f"""### Strategy: {strat_id}
+- **Status**: {state['readiness_status']}
+- **Readiness Reason**: {state['readiness_reason']}
+
+#### Decision Contribution
+- **Resolved Decisions**: {snapshot.decision_count}
+- **Required Decisions**: 500
+- **Resolution Window**: {win_start} to {win_end}
+
+#### Performance Attribution
+- **Top Positive Decisions (EV)**:
+{top_pos}
+
+- **Top Negative Decisions (EV)**:
+{top_neg}
+
+#### Signal Distribution
+- **Data Origin**: {snapshot.data_origin}
+- **Reconstruction Hash**: {snapshot.reconstruction_hash}
+
+---
+"""
+        with open("PROMOTION_EXPLAINABILITY_REPORT.md", "w") as f:
+            f.write(report_md)
 
     async def _generate_replay_parity_report(self):
         """

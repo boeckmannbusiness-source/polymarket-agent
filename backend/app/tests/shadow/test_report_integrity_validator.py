@@ -6,10 +6,25 @@ def test_report_integrity_validator():
     validator = ReportIntegrityValidator()
 
     # Valid snapshot
+    import uuid
+    import hashlib
+    import json
+    uid = uuid.uuid4()
+    decision_ids = [uid]
+    source_tables = ["shadow_decision_log"]
+    res_range = (None, None)
+    recon_data = {
+        "decision_ids": [str(uid)],
+        "resolution_range": [None, None],
+        "source_tables": source_tables
+    }
+    h = hashlib.sha256(json.dumps(recon_data, sort_keys=True).encode()).hexdigest()
+
     snapshot = PromotionEvidenceSnapshot(
         strategy_id="s1", decision_count=1, realized_ev=0, replay_parity=1.0,
         brier_score=0.1, certification_violations=0, data_origin="shadow",
-        decision_ids=["id1"]
+        decision_ids=decision_ids, source_tables=source_tables, resolution_range=res_range,
+        reconstruction_hash=h
     )
     assert validator.validate_snapshot(snapshot, "READY") is True
 
@@ -28,9 +43,10 @@ def test_invalid_report_rejected():
         validator.validate_snapshot(snapshot, "READY")
 
     # Invalid: Population mismatch
+    import uuid
     snapshot.data_origin = "shadow"
     snapshot.decision_count = 10
-    snapshot.decision_ids = ["id1"] # Only 1
+    snapshot.decision_ids = [uuid.uuid4()] # Only 1
     with pytest.raises(ReportIntegrityError, match="Population mismatch"):
         validator.validate_snapshot(snapshot, "NOT_READY")
 

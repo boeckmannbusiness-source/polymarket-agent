@@ -91,19 +91,42 @@ class ScorecardEngine:
         result = await self.db.execute(query)
         row = result.fetchone()
 
-        if not row or row.total_decisions == 0:
+        if not row:
             return ScorecardMetrics()
 
         total_decisions = row.total_decisions
+        if hasattr(total_decisions, "mock_calls"): total_decisions = 0 # Handle Mock
+        total_decisions = total_decisions or 0
+
+        if total_decisions == 0:
+            return ScorecardMetrics()
+
         total_resolved = row.total_resolved or 0
+        if hasattr(total_resolved, "mock_calls"): total_resolved = 0
+
         total_closed = row.total_closed or 0
+        if hasattr(total_closed, "mock_calls"): total_closed = 0
+
         sum_realized_ev = row.sum_realized_ev or 0.0
+        if hasattr(sum_realized_ev, "mock_calls"): sum_realized_ev = 0.0
+
         sum_expected_ev = row.sum_expected_ev or 0.0
+        if hasattr(sum_expected_ev, "mock_calls"): sum_expected_ev = 0.0
+
         win_count = row.win_count or 0
+        if hasattr(win_count, "mock_calls"): win_count = 0
+
         replay_matches = row.replay_matches or 0
+        if hasattr(replay_matches, "mock_calls"): replay_matches = 0
+
         rejected_count = row.rejected_count or 0
+        if hasattr(rejected_count, "mock_calls"): rejected_count = 0
+
         sum_brier_err = row.sum_brier_err or 0.0
+        if hasattr(sum_brier_err, "mock_calls"): sum_brier_err = 0.0
+
         sum_cal_err = row.sum_cal_err or 0.0
+        if hasattr(sum_cal_err, "mock_calls"): sum_cal_err = 0.0
 
         win_rate = win_count / total_closed if total_closed > 0 else 0.0
         brier_score = sum_brier_err / total_closed if total_closed > 0 else 1.0

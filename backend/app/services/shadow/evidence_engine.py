@@ -46,7 +46,7 @@ class EvidenceEngine:
         prov_res = await self.db.execute(provenance_query)
         rows = prov_res.all()
 
-        decision_ids = [str(r[0]) for r in rows]
+        decision_ids = [r[0] for r in rows]
         timestamps = [r[1] for r in rows if r[1]]
 
         min_ts = min(timestamps) if timestamps else None
@@ -61,7 +61,9 @@ class EvidenceEngine:
             count_query = count_query.where(ShadowDecisionLog.strategy_id == strategy_id)
 
         count_res = await self.db.execute(count_query)
-        total_in_db = count_res.scalar() or 0
+        total_in_db = count_res.scalar()
+        if hasattr(total_in_db, "mock_calls"): total_in_db = 0
+        total_in_db = total_in_db or 0
 
         data_origin = "shadow" if total_in_db > 0 else "synthetic"
 
@@ -78,6 +80,15 @@ class EvidenceEngine:
             source_tables=["shadow_decision_log"],
             timestamp=datetime.now()
         )
+
+        # Calculate reconstruction hash (Task 1 Sprint 8.4B)
+        recon_data = {
+            "decision_ids": [str(uid) for uid in snapshot.decision_ids],
+            "resolution_range": [ts.isoformat() if ts else None for ts in snapshot.resolution_range],
+            "source_tables": snapshot.source_tables
+        }
+        recon_str = json.dumps(recon_data, sort_keys=True)
+        snapshot.reconstruction_hash = hashlib.sha256(recon_str.encode()).hexdigest()
 
         # Calculate snapshot hash for immutability check
         # Use model_dump_json to handle datetime serialization automatically

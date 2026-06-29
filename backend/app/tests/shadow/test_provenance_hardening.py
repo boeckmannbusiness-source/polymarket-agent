@@ -11,6 +11,10 @@ async def test_snapshot_contains_decision_ids(db_session):
     # Create two RESOLVED decisions
     id1 = uuid.uuid4()
     id2 = uuid.uuid4()
+
+    # We also need decisions in DB for data_origin check
+    from app.models.shadow_decision_log import ShadowDecisionLog
+    # Need > 100 total decisions for many services now, but here we check origin logic
     now = datetime.now(timezone.utc)
 
     db_session.add(ShadowDecisionLog(
@@ -27,8 +31,8 @@ async def test_snapshot_contains_decision_ids(db_session):
     snapshot = await engine.generate_snapshot("strat1")
 
     assert len(snapshot.decision_ids) == 2
-    assert str(id1) in snapshot.decision_ids
-    assert str(id2) in snapshot.decision_ids
+    assert id1 in snapshot.decision_ids
+    assert id2 in snapshot.decision_ids
     assert snapshot.data_origin == "shadow"
     # Handle possible timezone stripping in SQLite
     res0 = snapshot.resolution_range[0]
@@ -43,6 +47,7 @@ async def test_snapshot_contains_decision_ids(db_session):
 
 @pytest.mark.asyncio
 async def test_mixed_origin_rejected(db_session):
+    import uuid
     # Create a synthetic snapshot (manually since EvidenceEngine currently infers)
     snapshot = PromotionEvidenceSnapshot(
         strategy_id="strat1",
@@ -52,7 +57,7 @@ async def test_mixed_origin_rejected(db_session):
         brier_score=0.1,
         certification_violations=0,
         data_origin="synthetic",
-        decision_ids=["fake-id"]
+        decision_ids=[uuid.uuid4()]
     )
 
     audit_service = PromotionAuditService(db_session)
