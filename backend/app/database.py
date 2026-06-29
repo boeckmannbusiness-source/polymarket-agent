@@ -5,15 +5,27 @@ from sqlalchemy.orm import DeclarativeBase
 from app.config import settings
 
 
+engine_kwargs = {
+    "pool_pre_ping": True,
+    "pool_recycle": 300,
+    "echo": settings.APP_DEBUG,
+}
+
+if settings.DATABASE_URL.startswith("sqlite"):
+    engine_kwargs["connect_args"] = {"check_same_thread": False}
+else:
+    engine_kwargs["pool_size"] = settings.DATABASE_POOL_SIZE
+    engine_kwargs["max_overflow"] = settings.DATABASE_MAX_OVERFLOW
+    engine_kwargs["connect_args"] = {
+        "timeout": 10,
+        "command_timeout": 30,
+        "server_settings": {"statement_timeout": "15000"},
+        "statement_cache_size": 0
+    }
+
 engine = create_async_engine(
     settings.DATABASE_URL,
-    pool_size=settings.DATABASE_POOL_SIZE,
-    max_overflow=settings.DATABASE_MAX_OVERFLOW,
-    pool_pre_ping=True,
-    pool_recycle=300,
-    connect_args={"timeout": 10, "command_timeout": 30, "server_settings": {"statement_timeout": "15000"},
-                  "statement_cache_size": 0},
-    echo=settings.APP_DEBUG,
+    **engine_kwargs
 )
 
 async_session_factory = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
