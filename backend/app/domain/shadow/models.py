@@ -16,6 +16,7 @@ class OutcomeReceipt(BaseModel):
 class ReplayParityReport(BaseModel):
     decision_id: UUID
     parity_score: float
+    category: str = "UNKNOWN" # EXACT, NUMERIC_DRIFT, TIMING_DRIFT, UNKNOWN
     mismatch_reason: Optional[str] = None
     deterministic: bool
     reproduced_confidence: float

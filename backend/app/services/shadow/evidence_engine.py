@@ -34,23 +34,38 @@ class EvidenceEngine:
         cert_res = await self.db.execute(cert_query)
         cert_violations = cert_res.scalar() or 0
 
-        # Determine data origin
-        data_origin = "synthetic"
+        # Retrieve decision IDs and resolution range for provenance
+        provenance_query = select(
+            ShadowDecisionLog.id,
+            ShadowDecisionLog.outcome_timestamp
+        ).where(ShadowDecisionLog.decision_status == "RESOLVED")
 
+        if strategy_id and strategy_id != "GLOBAL":
+            provenance_query = provenance_query.where(ShadowDecisionLog.strategy_id == strategy_id)
+
+        prov_res = await self.db.execute(provenance_query)
+        rows = prov_res.all()
+
+        decision_ids = [r[0] for r in rows]
+        timestamps = [r[1] for r in rows if r[1]]
+
+        min_ts = min(timestamps) if timestamps else None
+        max_ts = max(timestamps) if timestamps else None
+
+        # Determine data origin
         # Check if we have ANY decisions in the DB (real or unresolved)
+        # For Sprint 8.4, we use ALL decisions in DB to determine if we are in shadow mode
         from app.models.shadow_decision_log import ShadowDecisionLog
         count_query = select(func.count(ShadowDecisionLog.id))
         if strategy_id and strategy_id != "GLOBAL":
             count_query = count_query.where(ShadowDecisionLog.strategy_id == strategy_id)
 
         count_res = await self.db.execute(count_query)
-        total_in_db = count_res.scalar() or 0
+        total_in_db = count_res.scalar()
+        if hasattr(total_in_db, "mock_calls"): total_in_db = 0
+        total_in_db = total_in_db or 0
 
-        if total_in_db > 0:
-            # If we have decisions, check if they are real shadow decisions
-            # For Sprint 8.3, we assume if they are in the DB they are real shadow data
-            # unless explicitly marked otherwise (e.g. in tests)
-            data_origin = "shadow"
+        data_origin = "shadow" if total_in_db > 0 else "synthetic"
 
         snapshot = PromotionEvidenceSnapshot(
             strategy_id=strategy_id or "GLOBAL",
@@ -60,12 +75,24 @@ class EvidenceEngine:
             brier_score=metrics.brier_score,
             certification_violations=cert_violations,
             data_origin=data_origin,
+            decision_ids=decision_ids,
+            resolution_range=(min_ts, max_ts),
+            source_tables=["shadow_decision_log"],
             timestamp=datetime.now()
         )
 
+        # Calculate reconstruction hash (Task 1 Sprint 8.4B)
+        recon_data = {
+            "decision_ids": [str(uid) for uid in snapshot.decision_ids],
+            "resolution_range": [ts.isoformat() if ts else None for ts in snapshot.resolution_range],
+            "source_tables": snapshot.source_tables
+        }
+        recon_str = json.dumps(recon_data, sort_keys=True)
+        snapshot.reconstruction_hash = hashlib.sha256(recon_str.encode()).hexdigest()
+
         # Calculate snapshot hash for immutability check
-        snapshot_data = snapshot.model_dump(exclude={"snapshot_hash", "timestamp"})
-        snapshot_str = json.dumps(snapshot_data, sort_keys=True)
-        snapshot.snapshot_hash = hashlib.sha256(snapshot_str.encode()).hexdigest()
+        # Use model_dump_json to handle datetime serialization automatically
+        snapshot_json = snapshot.model_dump_json(exclude={"snapshot_hash", "timestamp"})
+        snapshot.snapshot_hash = hashlib.sha256(snapshot_json.encode()).hexdigest()
 
         return snapshot

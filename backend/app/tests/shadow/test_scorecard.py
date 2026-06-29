@@ -11,7 +11,7 @@ from app.schemas.shadow import StrategyScorecard
 
 # Helper to mock Row result
 ScorecardRow = namedtuple("ScorecardRow", [
-    "total_decisions", "total_closed", "sum_realized_ev", "sum_expected_ev",
+    "total_decisions", "total_resolved", "total_closed", "sum_realized_ev", "sum_expected_ev",
     "win_count", "replay_matches", "rejected_count", "sum_brier_err",
     "sum_cal_err", "avg_confidence", "conf_count"
 ])
@@ -26,7 +26,7 @@ async def test_scorecard_generation(mock_db):
 
     # Mock row data
     row = ScorecardRow(
-        total_decisions=1, total_closed=1, sum_realized_ev=1.0, sum_expected_ev=0.5,
+        total_decisions=1, total_resolved=1, total_closed=1, sum_realized_ev=1.0, sum_expected_ev=0.5,
         win_count=1, replay_matches=1, rejected_count=0, sum_brier_err=0.04,
         sum_cal_err=0.2, avg_confidence=0.8, conf_count=1
     )
@@ -47,7 +47,7 @@ async def test_scorecard_generation(mock_db):
 async def test_strategy_partitioning(mock_db):
     engine = ScorecardEngine(mock_db)
 
-    row = ScorecardRow(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0)
+    row = ScorecardRow(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0)
     mock_result = MagicMock()
     mock_result.fetchone.return_value = row
     mock_db.execute.return_value = mock_result
@@ -63,8 +63,8 @@ async def test_strategy_partitioning(mock_db):
 async def test_rolling_metrics(mock_db):
     engine = ScorecardEngine(mock_db)
 
-    row_global = ScorecardRow(2, 2, 0.3, 0.0, 1, 0, 0, 0.16, 0.4, 0.5, 2)
-    row_rolling = ScorecardRow(1, 1, 0.5, 0.0, 1, 0, 0, 0.16, 0.4, 0.6, 1)
+    row_global = ScorecardRow(2, 2, 2, 0.3, 0.0, 1, 0, 0, 0.16, 0.4, 0.5, 2)
+    row_rolling = ScorecardRow(1, 1, 1, 0.5, 0.0, 1, 0, 0, 0.16, 0.4, 0.6, 1)
 
     def side_effect(query):
         mock_res = MagicMock()

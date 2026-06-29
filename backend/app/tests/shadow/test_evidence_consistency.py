@@ -63,18 +63,39 @@ async def test_strategy_vs_global_consistency(mock_db):
     dashboard.evidence_engine.generate_snapshot = AsyncMock()
 
     now = datetime.now()
+    import uuid
+    import hashlib
+    import json
+    uids_global = [uuid.uuid4() for _ in range(1000)]
+    recon_data_global = {
+        "decision_ids": [str(uid) for uid in uids_global],
+        "resolution_range": [None, None],
+        "source_tables": ["shadow_decision_log"]
+    }
+    h_global = hashlib.sha256(json.dumps(recon_data_global, sort_keys=True).encode()).hexdigest()
+
+    uids_strat = [uuid.uuid4() for _ in range(500)]
+    recon_data_strat = {
+        "decision_ids": [str(uid) for uid in uids_strat],
+        "resolution_range": [None, None],
+        "source_tables": ["shadow_decision_log"]
+    }
+    h_strat = hashlib.sha256(json.dumps(recon_data_strat, sort_keys=True).encode()).hexdigest()
+
     global_snap = PromotionEvidenceSnapshot(
         strategy_id="GLOBAL", decision_count=1000, realized_ev=100.0,
         replay_parity=0.98, brier_score=0.1, certification_violations=0,
-        timestamp=now, snapshot_hash="global_hash"
+        data_origin="shadow", decision_ids=uids_global,
+        timestamp=now, snapshot_hash="global_hash", reconstruction_hash=h_global
     )
     strat_snap = PromotionEvidenceSnapshot(
         strategy_id="strat1", decision_count=500, realized_ev=50.0,
         replay_parity=0.97, brier_score=0.15, certification_violations=0,
-        timestamp=now, snapshot_hash="strat_hash"
+        data_origin="shadow", decision_ids=uids_strat,
+        timestamp=now, snapshot_hash="strat_hash", reconstruction_hash=h_strat
     )
 
-    dashboard.evidence_engine.generate_snapshot.side_effect = [global_snap, strat_snap]
+    dashboard.evidence_engine.generate_snapshot.side_effect = [global_snap, strat_snap, strat_snap]
 
     mock_strat_res = MagicMock()
     mock_strat_res.scalars.return_value.all.return_value = ["strat1"]

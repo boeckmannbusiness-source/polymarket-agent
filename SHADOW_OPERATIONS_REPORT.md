@@ -1,6 +1,6 @@
 # SHADOW_OPERATIONS_REPORT
-Generated at: 2026-06-28T14:55:43.613797
-Global Snapshot Hash: 95fffd10e1d2b5b2fb2999ebdcde9447021bb15d3ba36a80548c5cdf9f00d07d
+Generated at: 2026-06-29T13:28:32.043824
+Global Snapshot Hash: b99fdebd9671a13d8a7851742d332d0914bb90d7259fed09e5de9117c3c8efb6
 
 ## Throughput & Health
 | Metric | Value |
@@ -13,7 +13,7 @@ Global Snapshot Hash: 95fffd10e1d2b5b2fb2999ebdcde9447021bb15d3ba36a80548c5cdf9f
 ## Strategy Rankings
 | Strategy | Status | Realized EV | Stability Issues | Snapshot Hash |
 |----------|--------|-------------|------------------|---------------|
-| strat | NOT_READY | 10.0000 | 0 | 9905af9a8f28d9633dbca1cda8cb640a9d503043ce45b3179c27060812a7e138 |
+| strat | NOT_READY | 10.0000 | 0 | 45e0b3cdf1a4766212b927f23e12476ffed25c652cf343351246da791f1e248e |
 
 ## Certification Health
 | Invariant | Violations | Status |

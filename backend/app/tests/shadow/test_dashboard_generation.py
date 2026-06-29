@@ -16,17 +16,30 @@ async def test_dashboard_generation(mock_db):
 
     # Mock snapshots
     now = datetime.now()
+    import uuid
+    import hashlib
+    import json
+    uids = [uuid.uuid4() for _ in range(100)]
+    recon_data = {
+        "decision_ids": [str(uid) for uid in uids],
+        "resolution_range": [None, None],
+        "source_tables": ["shadow_decision_log"]
+    }
+    h = hashlib.sha256(json.dumps(recon_data, sort_keys=True).encode()).hexdigest()
+
     global_snap = PromotionEvidenceSnapshot(
         strategy_id="GLOBAL", decision_count=100, realized_ev=50.0,
         replay_parity=0.98, brier_score=0.1, certification_violations=0,
-        timestamp=now, snapshot_hash="global_hash"
+        data_origin="shadow", decision_ids=uids,
+        timestamp=now, snapshot_hash="global_hash", reconstruction_hash=h
     )
     strat_snap = PromotionEvidenceSnapshot(
         strategy_id="strat1", decision_count=100, realized_ev=50.0,
         replay_parity=0.98, brier_score=0.1, certification_violations=0,
-        timestamp=now, snapshot_hash="strat_hash"
+        data_origin="shadow", decision_ids=uids,
+        timestamp=now, snapshot_hash="strat_hash", reconstruction_hash=h
     )
-    service.evidence_engine.generate_snapshot = AsyncMock(side_effect=[global_snap, strat_snap])
+    service.evidence_engine.generate_snapshot = AsyncMock(side_effect=[global_snap, strat_snap, strat_snap])
 
     # Mock strategy list
     mock_strat_res = MagicMock()
@@ -70,4 +83,5 @@ async def test_dashboard_consistency(mock_db):
     service.evidence_engine.generate_snapshot = AsyncMock(return_value=global_snap)
 
     report = await service.generate_ops_report()
-    assert "Total Decisions | 0" in report
+    # Updated text to match SHADOW_OPERATIONS_REPORT
+    assert "Total Resolved Decisions | 0" in report

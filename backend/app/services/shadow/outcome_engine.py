@@ -68,15 +68,24 @@ class OutcomeClosureEngine:
             resolution_price=resolution_price
         )
 
+        # Enforce strict state transition OPEN -> CLOSED -> RESOLVED
+        if log_entry.decision_status != "OPEN":
+            raise ValueError(f"Invalid transition: cannot resolve decision in state {log_entry.decision_status}")
+
         # Update log entry
         log_entry.realized_ev = realized_ev
         log_entry.actual_ev = realized_ev
         log_entry.simulated_exit_price = resolution_price
         log_entry.outcome_timestamp = now
         log_entry.market_resolution_source = resolution_source
-        # Transition OPEN -> CLOSED -> RESOLVED
+
+        # Transition OPEN -> CLOSED
         log_entry.decision_status = "CLOSED"
         await self.db.flush()
+
+        # Transition CLOSED -> RESOLVED
+        if log_entry.decision_status != "CLOSED":
+            raise ValueError(f"State corruption: expected CLOSED, found {log_entry.decision_status}")
 
         log_entry.decision_status = "RESOLVED"
         await self.db.flush()

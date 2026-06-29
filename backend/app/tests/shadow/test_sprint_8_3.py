@@ -131,9 +131,9 @@ async def test_readiness_gate_blocks_premature_ready(db_session):
         )
 
     state = await readiness_service.get_readiness_state("low_volume_strat")
-    # All are OPEN, so resolved count is 0. Status should be COLLECTING with reason AWAITING_RESOLUTION
+    # All are OPEN, so resolved count is 0. Status should be COLLECTING (volume < 100)
     assert state["readiness_status"] == ReadinessStatus.COLLECTING
-    assert state["readiness_reason"] == "AWAITING_RESOLUTION"
+    assert state["readiness_reason"] == "COLLECTING_INITIAL_SIGNALS"
 
     # Resolve some
     outcome_engine = OutcomeClosureEngine(db_session)
@@ -143,6 +143,7 @@ async def test_readiness_gate_blocks_premature_ready(db_session):
         await outcome_engine.resolve_decision(d.id, 0.6)
 
     state = await readiness_service.get_readiness_state("low_volume_strat")
+    # Still < 100 total
     assert state["readiness_status"] == ReadinessStatus.COLLECTING
     assert state["decision_count"] == 5
 
@@ -164,6 +165,7 @@ async def test_readiness_gate_blocks_premature_ready(db_session):
         await outcome_engine.resolve_decision(d.id, 0.6)
 
     state = await readiness_service.get_readiness_state("insufficient_strat")
+    # 200 resolved, > 100 total, but < 500 resolved
     assert state["readiness_status"] == ReadinessStatus.INSUFFICIENT_VOLUME
 
 @pytest.mark.asyncio

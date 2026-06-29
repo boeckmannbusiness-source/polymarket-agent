@@ -1,6 +1,7 @@
 from pydantic import BaseModel, Field
 from datetime import datetime
-from typing import Any
+from typing import Any, Literal
+from uuid import UUID
 
 
 class ShadowExecutionResponse(BaseModel):
@@ -112,6 +113,10 @@ class PromotionEvidenceSnapshot(BaseModel):
     realized_ev: float
     brier_score: float
     certification_violations: int
-    data_origin: str = "synthetic"  # synthetic, shadow, replay
+    data_origin: Literal["shadow", "synthetic", "mixed"] = "synthetic"
+    decision_ids: list[UUID] = Field(default_factory=list)
+    resolution_range: tuple[datetime | None, datetime | None] = (None, None)
+    source_tables: list[str] = Field(default_factory=lambda: ["shadow_decision_log"])
     timestamp: datetime = Field(default_factory=datetime.now)
     snapshot_hash: str | None = None
+    reconstruction_hash: str | None = None

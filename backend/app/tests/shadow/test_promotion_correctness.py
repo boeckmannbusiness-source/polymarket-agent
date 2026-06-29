@@ -69,4 +69,5 @@ async def test_blocking_reasons_generated(mock_db):
 
     audit = await service.audit_strategy("strat1")
     assert audit["status"] == "NOT_READY"
-    assert len(audit["reasons"]) == 4
+    # Added origin synthetic and its rejection
+    assert len(audit["reasons"]) == 6
