@@ -66,11 +66,13 @@ async def test_strategy_vs_global_consistency(mock_db):
     global_snap = PromotionEvidenceSnapshot(
         strategy_id="GLOBAL", decision_count=1000, realized_ev=100.0,
         replay_parity=0.98, brier_score=0.1, certification_violations=0,
+        data_origin="shadow", decision_ids=["id"] * 1000,
         timestamp=now, snapshot_hash="global_hash"
     )
     strat_snap = PromotionEvidenceSnapshot(
         strategy_id="strat1", decision_count=500, realized_ev=50.0,
         replay_parity=0.97, brier_score=0.15, certification_violations=0,
+        data_origin="shadow", decision_ids=["id"] * 500,
         timestamp=now, snapshot_hash="strat_hash"
     )
 

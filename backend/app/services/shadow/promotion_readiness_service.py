@@ -9,9 +9,9 @@ from app.services.shadow.promotion_audit_service import PromotionAuditService
 from app.core.logging import logger
 
 class ReadinessStatus(str, enum.Enum):
-    NOT_STARTED = "NOT_STARTED"
-    COLLECTING = "COLLECTING"
-    INSUFFICIENT_VOLUME = "INSUFFICIENT_VOLUME"
+    VALIDATED = "VALIDATED"
+    NOT_READY = "NOT_READY"
+    INSUFFICIENT_EVIDENCE = "INSUFFICIENT_EVIDENCE"
     EVALUATING = "EVALUATING"
     READY = "READY"
 
@@ -39,20 +39,18 @@ class PromotionReadinessService:
         total_in_db_res = await self.db.execute(total_in_db_query)
         total_in_db = total_in_db_res.scalar() or 0
 
-        status = ReadinessStatus.NOT_STARTED
+        # Sprint 8.4A: Policy-derived status logic
+        status = ReadinessStatus.NOT_READY
         reason = "NO_DECISIONS"
 
         if total_in_db == 0:
-            status = ReadinessStatus.NOT_STARTED
+            status = ReadinessStatus.NOT_READY
             reason = "NO_DECISIONS"
         elif snapshot.decision_count == 0:
-            status = ReadinessStatus.COLLECTING
+            status = ReadinessStatus.INSUFFICIENT_EVIDENCE
             reason = "AWAITING_RESOLUTION"
-        elif snapshot.decision_count < 100: # Arbitrary threshold for COLLECTING
-            status = ReadinessStatus.COLLECTING
-            reason = "INSUFFICIENT_VOLUME"
         elif snapshot.decision_count < 500:
-            status = ReadinessStatus.INSUFFICIENT_VOLUME
+            status = ReadinessStatus.INSUFFICIENT_EVIDENCE
             reason = "INSUFFICIENT_VOLUME"
         else:
             if audit["status"] == "READY":
@@ -62,7 +60,7 @@ class PromotionReadinessService:
                 status = ReadinessStatus.EVALUATING
                 reason = "FAILED_POLICY"
 
-        # Task 4: Forecast logic
+        # Sprint 8.4A: Forecast logic
         resolved_today = 0
         rolling_7d = 0.0
         eta_days = "UNKNOWN"
@@ -103,6 +101,11 @@ class PromotionReadinessService:
         except Exception as e:
             logger.error("forecast_calculation_failed", error=str(e))
 
+        # Replace placeholders for missing values
+        def sanitize_val(val):
+            if val is None: return "NOT_AVAILABLE"
+            return val
+
         return {
             "strategy_id": strategy_id,
             "readiness_status": status.value,
@@ -112,8 +115,8 @@ class PromotionReadinessService:
             "data_origin": snapshot.data_origin,
             "snapshot_hash": snapshot.snapshot_hash,
             "forecast": {
-                "resolved_today": resolved_today,
-                "rolling_7d": rolling_7d,
-                "estimated_days_to_500": eta_days
+                "resolved_today": sanitize_val(resolved_today),
+                "rolling_7d": sanitize_val(rolling_7d),
+                "estimated_days_to_500": sanitize_val(eta_days)
             }
         }

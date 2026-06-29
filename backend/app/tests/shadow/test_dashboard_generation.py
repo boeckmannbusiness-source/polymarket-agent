@@ -19,11 +19,13 @@ async def test_dashboard_generation(mock_db):
     global_snap = PromotionEvidenceSnapshot(
         strategy_id="GLOBAL", decision_count=100, realized_ev=50.0,
         replay_parity=0.98, brier_score=0.1, certification_violations=0,
+        data_origin="shadow", decision_ids=["id"] * 100,
         timestamp=now, snapshot_hash="global_hash"
     )
     strat_snap = PromotionEvidenceSnapshot(
         strategy_id="strat1", decision_count=100, realized_ev=50.0,
         replay_parity=0.98, brier_score=0.1, certification_violations=0,
+        data_origin="shadow", decision_ids=["id"] * 100,
         timestamp=now, snapshot_hash="strat_hash"
     )
     service.evidence_engine.generate_snapshot = AsyncMock(side_effect=[global_snap, strat_snap])

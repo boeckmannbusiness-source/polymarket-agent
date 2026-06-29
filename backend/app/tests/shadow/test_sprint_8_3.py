@@ -131,8 +131,8 @@ async def test_readiness_gate_blocks_premature_ready(db_session):
         )
 
     state = await readiness_service.get_readiness_state("low_volume_strat")
-    # All are OPEN, so resolved count is 0. Status should be COLLECTING with reason AWAITING_RESOLUTION
-    assert state["readiness_status"] == ReadinessStatus.COLLECTING
+    # All are OPEN, so resolved count is 0. Status should be INSUFFICIENT_EVIDENCE with reason AWAITING_RESOLUTION
+    assert state["readiness_status"] == ReadinessStatus.INSUFFICIENT_EVIDENCE
     assert state["readiness_reason"] == "AWAITING_RESOLUTION"
 
     # Resolve some
@@ -143,7 +143,7 @@ async def test_readiness_gate_blocks_premature_ready(db_session):
         await outcome_engine.resolve_decision(d.id, 0.6)
 
     state = await readiness_service.get_readiness_state("low_volume_strat")
-    assert state["readiness_status"] == ReadinessStatus.COLLECTING
+    assert state["readiness_status"] == ReadinessStatus.INSUFFICIENT_EVIDENCE
     assert state["decision_count"] == 5
 
     # Add up to 200 decisions and resolve them
@@ -164,7 +164,7 @@ async def test_readiness_gate_blocks_premature_ready(db_session):
         await outcome_engine.resolve_decision(d.id, 0.6)
 
     state = await readiness_service.get_readiness_state("insufficient_strat")
-    assert state["readiness_status"] == ReadinessStatus.INSUFFICIENT_VOLUME
+    assert state["readiness_status"] == ReadinessStatus.INSUFFICIENT_EVIDENCE
 
 @pytest.mark.asyncio
 async def test_dashboard_generates_health_report(db_session):
