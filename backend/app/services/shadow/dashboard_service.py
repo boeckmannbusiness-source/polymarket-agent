@@ -304,15 +304,18 @@ Generated at: {timestamp}
             )
         ).where(ShadowDecisionLog.decision_status == "RESOLVED")
 
-        # Note: julianday is SQLite specific for tests. In Postgres it would be different.
-        # But we'll try to keep it general or handle as we did with variance if needed.
+        # Cross-dialect compatible approach for latency
+        latency_query = select(ShadowDecisionLog.created_at, ShadowDecisionLog.outcome_timestamp).where(
+            ShadowDecisionLog.decision_status == "RESOLVED"
+        )
         try:
             latency_res = await self.db.execute(latency_query)
-            avg_latency_days = latency_res.scalar()
-            if hasattr(avg_latency_days, "__format__"): # Handle Mock
-                avg_latency_hours = 0.0
+            rows = latency_res.all()
+            if rows:
+                total_seconds = sum((r.outcome_timestamp - r.created_at).total_seconds() for r in rows)
+                avg_latency_hours = (total_seconds / len(rows)) / 3600.0
             else:
-                avg_latency_hours = (avg_latency_days or 0.0) * 24.0
+                avg_latency_hours = 0.0
         except Exception:
             avg_latency_hours = 0.0
 

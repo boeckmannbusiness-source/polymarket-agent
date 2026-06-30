@@ -27,6 +27,7 @@ from .wallet_trade import SolanaWalletTrade
 from .research_trade import ResearchTrade
 from .shadow_position import ShadowPosition
 from .research_hypothesis import ResearchHypothesis
+from .shadow_runtime_state import ShadowRuntimeState
 
 __all__ = [
     "Market",
@@ -67,4 +68,5 @@ __all__ = [
     "ResearchTrade",
     "ResearchHypothesis",
     "ShadowPosition",
+    "ShadowRuntimeState",
 ]

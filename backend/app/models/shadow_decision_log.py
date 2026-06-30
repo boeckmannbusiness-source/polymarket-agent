@@ -50,4 +50,7 @@ class ShadowDecisionLog(Base):
     certification_version: Mapped[str | None] = mapped_column(String(32), nullable=True)
     certification_snapshot_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
     certification_violation: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    sample_reason: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    audit_candidate: Mapped[bool | None] = mapped_column(Boolean, nullable=True, default=False)
+    sampling_bucket: Mapped[str | None] = mapped_column(String(32), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
