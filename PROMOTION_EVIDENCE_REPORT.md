@@ -1,18 +1,21 @@
 # PROMOTION_EVIDENCE_REPORT
-Generated at: 2026-06-29T13:28:32.047450
+Generated at: 2026-07-01T08:37:57.449591+00:00
 
-## Global Evidence (Source Consistent)
-- **Snapshot Hash**: b99fdebd9671a13d8a7851742d332d0914bb90d7259fed09e5de9117c3c8efb6
-- **Resolved Decision Count**: 1
-- **Replay Parity**: 100.0000%
-- **Realized EV**: 10.0000
-- **Brier Score**: 0.0400
+## Evidence Snapshot
+| Metric | Value |
+|--------|-------|
+| strategy_id | GLOBAL |
+| decision_count | 5 |
+| replay_parity | 1.0000 |
+| realized_ev | 3.2475 |
+| brier_score | 0.4545 |
+| data_origin | shadow |
+| snapshot_hash | 47c2aefaaace57f4342e2f8b7544ddb8290ae0d0bc957bc6eacd689e82ab5882 |
+| reconstruction_hash | 4bfeab33217c099bbbd5a52f7ec9d22bd2a1218c2f671e428847c23f8b32fcd1 |
+| certification_violations | 0 |
+| decision_ids_count | 5 |
 
-## Strategy Evidence Mapping
-| Strategy | Status | Snapshot Hash | Source Consistent |
-|----------|--------|---------------|-------------------|
-| strat | NOT_READY | 45e0b3cdf1a4766212b927f23e12476ffed25c652cf343351246da791f1e248e | TRUE |
-
-## Validation
-- **Source Consistent**: TRUE (All reports derive from single EvidenceEngine snapshots)
-- **Deterministic**: TRUE (Snapshots are hashed based on stable metric fields)
+## Verification
+- **Snapshot Reproducible**: YES
+- **Origin Verified**: YES
+- **Promotion Status**: OBSERVATION_ONLY (AUTO_PROMOTION=DISABLED)

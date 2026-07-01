@@ -450,8 +450,8 @@ async def lifespan(app: FastAPI):
     bg_tasks.append(asyncio.create_task(_shadow_eval_loop(), name="shadow_eval"))
     logger.info("shadow_eval_started")
 
-    # ── Sprint 9.0 Shadow Operations ──
-    bg_tasks.append(asyncio.create_task(_periodic_shadow_runtime_scheduler(), name="shadow_runtime_scheduler"))
+    # ── Sprint 9.0 / 9.0A Shadow Operations ──
+    bg_tasks.append(asyncio.create_task(_periodic_shadow_runtime_runner(), name="shadow_runtime_runner"))
     bg_tasks.append(asyncio.create_task(_periodic_shadow_aging_check(), name="shadow_aging_check"))
     bg_tasks.append(asyncio.create_task(_periodic_shadow_readiness_observation(), name="shadow_readiness_observation"))
     logger.info("shadow_ops_started")
@@ -1386,13 +1386,18 @@ async def _shadow_price_tracker_loop():
         await asyncio.sleep(settings.SOLANA_SHADOW_EVAL_INTERVAL)
 
 
-async def _periodic_shadow_runtime_scheduler():
+async def _periodic_shadow_runtime_runner():
     from app.database import async_session_factory
-    from app.services.shadow.runtime_scheduler import ShadowRuntimeScheduler
+    from app.services.shadow.runtime_runner import ShadowRuntimeRunner
 
     await asyncio.sleep(30)
-    scheduler = ShadowRuntimeScheduler(async_session_factory, interval_seconds=60)
-    await scheduler.start()
+    runner = ShadowRuntimeRunner(
+        session_factory=async_session_factory,
+        interval_seconds=60,
+        runtime_target_seconds=3600,
+    )
+    await runner.start()
+    await runner.export_runtime_evidence()
 
 
 async def _periodic_shadow_aging_check():
