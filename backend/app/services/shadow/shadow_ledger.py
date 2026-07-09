@@ -47,8 +47,15 @@ class ShadowLedger:
         """
         Records a shadow decision in the ledger.
         """
+        decision_id = uuid.uuid4()
+
+        # Task 2: Apply deterministic sampling
+        from app.services.shadow.sampling_service import ShadowSamplingService
+        sampling_svc = ShadowSamplingService(self.db)
+        sample_reason, audit_candidate, sampling_bucket = sampling_svc.get_sampling_result(decision_id)
+
         log_entry = ShadowDecisionLog(
-            id=uuid.uuid4(),
+            id=decision_id,
             timestamp=datetime.now(timezone.utc),
             market_id=market_id,
             signal_id=signal_id,
@@ -74,6 +81,9 @@ class ShadowLedger:
             regime_confidence=regime_confidence,
             approval_reason=approval_reason,
             rejection_reason=rejection_reason,
+            sample_reason=sample_reason,
+            audit_candidate=audit_candidate,
+            sampling_bucket=sampling_bucket,
         )
 
         self.db.add(log_entry)

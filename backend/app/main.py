@@ -450,6 +450,12 @@ async def lifespan(app: FastAPI):
     bg_tasks.append(asyncio.create_task(_shadow_eval_loop(), name="shadow_eval"))
     logger.info("shadow_eval_started")
 
+    # ── Sprint 9.0 Shadow Operations ──
+    bg_tasks.append(asyncio.create_task(_periodic_shadow_runtime_scheduler(), name="shadow_runtime_scheduler"))
+    bg_tasks.append(asyncio.create_task(_periodic_shadow_aging_check(), name="shadow_aging_check"))
+    bg_tasks.append(asyncio.create_task(_periodic_shadow_readiness_observation(), name="shadow_readiness_observation"))
+    logger.info("shadow_ops_started")
+
     yield
 
     logger.info("shutting_down")
@@ -1378,6 +1384,56 @@ async def _shadow_price_tracker_loop():
             await asyncio.sleep(5)
             continue
         await asyncio.sleep(settings.SOLANA_SHADOW_EVAL_INTERVAL)
+
+
+async def _periodic_shadow_runtime_scheduler():
+    from app.database import async_session_factory
+    from app.services.shadow.runtime_scheduler import ShadowRuntimeScheduler
+
+    await asyncio.sleep(30)
+    scheduler = ShadowRuntimeScheduler(async_session_factory, interval_seconds=60)
+    await scheduler.start()
+
+
+async def _periodic_shadow_aging_check():
+    import asyncio
+    from app.database import async_session_factory
+    from app.services.shadow.aging_service import ShadowAgingService
+
+    await asyncio.sleep(60)
+    while True:
+        try:
+            async with async_session_factory() as db:
+                svc = ShadowAgingService(db)
+                await svc.check_aging()
+                await svc.generate_aging_report()
+        except asyncio.CancelledError:
+            break
+        except Exception as e:
+            logger.warning("shadow_aging_check_error", error=str(e))
+        await asyncio.sleep(3600)
+
+
+async def _periodic_shadow_readiness_observation():
+    import asyncio
+    from app.database import async_session_factory
+    from app.services.shadow.promotion_observation_service import PromotionObservationService
+    from app.services.shadow.sampling_service import ShadowSamplingService
+
+    await asyncio.sleep(120)
+    while True:
+        try:
+            async with async_session_factory() as db:
+                obs_svc = PromotionObservationService(db)
+                await obs_svc.generate_observation_report()
+
+                samp_svc = ShadowSamplingService(db)
+                await samp_svc.generate_sampling_report()
+        except asyncio.CancelledError:
+            break
+        except Exception as e:
+            logger.warning("shadow_readiness_observation_error", error=str(e))
+        await asyncio.sleep(3600)
 
 
 async def _shadow_eval_loop():
