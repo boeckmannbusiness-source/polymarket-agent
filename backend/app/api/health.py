@@ -119,9 +119,14 @@ async def liveness():
 
 
 async def _check_redis(timeout: float = 2.0) -> dict:
+    from app.config import settings
+    if not settings.REDIS_ENABLED:
+        return {"status": "not_configured"}
     try:
         from app.redis import get_redis
         r = await asyncio.wait_for(get_redis(), timeout=timeout)
+        if r is None:
+            return {"status": "not_configured"}
         await asyncio.wait_for(r.ping(), timeout=timeout)
         return {"status": "ok", "latency_ms": 0}
     except asyncio.TimeoutError:
@@ -142,9 +147,14 @@ async def _check_database(timeout: float = 2.0) -> dict:
 
 
 async def _check_event_store(timeout: float = 2.0) -> dict:
+    from app.config import settings
+    if not settings.REDIS_ENABLED:
+        return {"status": "not_configured"}
     try:
         from app.redis import get_redis
         r = await asyncio.wait_for(get_redis(), timeout=timeout)
+        if r is None:
+            return {"status": "not_configured"}
         exists = await asyncio.wait_for(r.exists("event_store"), timeout=timeout)
         return {"status": "ok" if exists else "empty", "exists": bool(exists)}
     except asyncio.TimeoutError:
@@ -196,7 +206,8 @@ async def readiness():
         except Exception as e:
             results[check_name] = {"status": "error", "detail": str(e)}
 
-    all_healthy = all(r.get("status") == "ok" for r in results.values())
+    ok_statuses = {"ok", "not_configured", "empty"}
+    all_healthy = all(r.get("status") in ok_statuses for r in results.values())
     return {"status": "healthy" if all_healthy else "degraded", "checks": results}
 
 

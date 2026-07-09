@@ -77,23 +77,25 @@ class TradeService:
         if FORCE_TRADING_DISABLED:
             raise TradeExecutionError("Trading disabled by operator kill switch.")
 
-        try:
-            from app.redis import get_redis
-            r = await get_redis()
-            remote_state_raw = await r.get("remote:state")
-            if remote_state_raw:
-                remote_state = json.loads(remote_state_raw)
-                if not remote_state.get("tradingEnabled", True):
-                    raise TradeExecutionError("Trading disabled by remote control.")
-        except (ExecutionAuthorizationError, PermissionError):
-            raise
-        except Exception as e:
-            logger.critical("state_store_unavailable_trading_halted", error=str(e))
-            raise SystemHaltException(
-                "STATE STORE FAILURE -> TRADING HALTED. "
-                "Cannot verify remote kill switch state. "
-                "Fail-closed: trading blocked until state store is recovered."
-            ) from e
+        if settings.REDIS_ENABLED:
+            try:
+                from app.redis import get_redis
+                r = await get_redis()
+                if r is not None:
+                    remote_state_raw = await r.get("remote:state")
+                    if remote_state_raw:
+                        remote_state = json.loads(remote_state_raw)
+                        if not remote_state.get("tradingEnabled", True):
+                            raise TradeExecutionError("Trading disabled by remote control.")
+            except (ExecutionAuthorizationError, PermissionError):
+                raise
+            except Exception as e:
+                logger.critical("state_store_unavailable_trading_halted", error=str(e))
+                raise SystemHaltException(
+                    "STATE STORE FAILURE -> TRADING HALTED. "
+                    "Cannot verify remote kill switch state. "
+                    "Fail-closed: trading blocked until state store is recovered."
+                ) from e
 
         # Strict Confidence Resolution: None is treated as 0.0 for maximum safety (fail-closed)
         resolved_confidence = float(request.confidence) if request.confidence is not None else 0.0

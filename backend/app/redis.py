@@ -3,6 +3,7 @@ import redis.asyncio as redis
 from redis.asyncio.connection import ConnectionPool, MaxConnectionsError
 
 from app.config import settings
+from app.core.logging import logger
 
 
 class _BlockingPool(ConnectionPool):
@@ -18,7 +19,9 @@ _pool: _BlockingPool | None = None
 _pool_lock = asyncio.Lock()
 
 
-async def get_redis() -> redis.Redis:
+async def get_redis() -> redis.Redis | None:
+    if not settings.REDIS_URL:
+        return None
     global _pool
     if _pool is None:
         async with _pool_lock:

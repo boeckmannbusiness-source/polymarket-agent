@@ -17,7 +17,7 @@ dependencies = [
     "asyncpg>=0.30.0",
     "alembic>=1.13.0",
 
-    # Redis / Events
+    # Redis / Events (optional — use self-hosted Valkey for production)
     "redis[hiredis]>=5.2.0",
 
     # LLM

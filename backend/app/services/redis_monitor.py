@@ -17,24 +17,12 @@ class RedisMonitor:
         }
 
     async def collect_snapshot(self):
+        from app.config import settings
+        if not settings.REDIS_ENABLED:
+            return
         r = await get_redis()
-
-        for stream, groups in self._streams.items():
-            try:
-                info = await r.xinfo_stream(stream)
-                stream_length.labels(stream=stream).set(info["length"])
-            except Exception:
-                stream_length.labels(stream=stream).set(-1)
-
-            for group in groups:
-                try:
-                    pending = await r.xpending(stream, group)
-                    pending_count = pending.get("pending", 0) if isinstance(pending, dict) else (pending[0] if isinstance(pending, (list, tuple)) else 0)
-                    consumer_pending.labels(stream=stream, consumer_group=group).set(pending_count)
-                    pel_depth.labels(stream=stream, group=group).set(pending_count)
-                except Exception:
-                    consumer_pending.labels(stream=stream, consumer_group=group).set(-1)
-                    pel_depth.labels(stream=stream, group=group).set(-1)
+        if r is None:
+            return
 
         try:
             mem_info = await r.info("memory")

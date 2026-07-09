@@ -69,11 +69,15 @@ class Settings(BaseSettings):
     DATABASE_POOL_SIZE: int = 15
     DATABASE_MAX_OVERFLOW: int = 5
 
-    # Redis
-    REDIS_URL: str = "redis://user:password@host:6379/0"
+    # Redis / Valkey
+    REDIS_URL: str = ""
     REDIS_MAX_CONNECTIONS: int = 5
     REDIS_STREAM_MAXLEN: int = 1000
     REDIS_PLAN_LIMIT_MB: int = 30
+
+    @property
+    def REDIS_ENABLED(self) -> bool:
+        return bool(self.REDIS_URL)
 
     # Telegram
     TELEGRAM_BOT_TOKEN: str = ""
@@ -176,6 +180,12 @@ class Settings(BaseSettings):
     # ── Stream trimming ───────────────────────────────────────
     STREAM_TRIM_APPROX: bool = True
     STREAM_TRIM_INTERVAL: int = 600
+
+    # ── Franklin (optional execution provider) ─────────────────
+    FRANKLIN_ENABLED: bool = False
+    FRANKLIN_API_KEY: str = ""
+    FRANKLIN_TIMEOUT_SECONDS: int = 30
+    FRANKLIN_MODE: Literal["sandbox", "live"] = "sandbox"
 
 
 settings = Settings()
