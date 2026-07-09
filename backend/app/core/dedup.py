@@ -7,7 +7,7 @@ from app.core.logging import logger
 
 _local_cache = LRUCache(maxsize=settings.DEDUP_MAX_KEYS, ttl=settings.DEDUP_TTL_SECONDS)
 
-_redis_enabled = settings.DEDUP_REDIS_ENABLED and settings.REDIS_ENABLED
+_redis_enabled = settings.DEDUP_REDIS_ENABLED
 
 if _redis_enabled:
     _redis_cache = None

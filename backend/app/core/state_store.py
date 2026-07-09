@@ -1,3 +1,4 @@
+from typing import Set, List
 import json
 import time
 from typing import Any
@@ -28,10 +29,10 @@ class StateStore:
     async def hdel(self, name: str, key: str):
         raise NotImplementedError
 
-    async def hkeys(self, name: str) -> list[str]:
+    async def hkeys(self, name: str) -> List[str]:
         raise NotImplementedError
 
-    async def smembers(self, name: str) -> set[str]:
+    async def smembers(self, name: str) -> Set[str]:
         raise NotImplementedError
 
     async def sadd(self, name: str, member: str):
@@ -72,10 +73,10 @@ class RedisStateStore(StateStore):
     async def hdel(self, name: str, key: str):
         await self._r.hdel(name, key)
 
-    async def hkeys(self, name: str) -> list[str]:
+    async def hkeys(self, name: str) -> List[str]:
         return await self._r.hkeys(name)
 
-    async def smembers(self, name: str) -> set[str]:
+    async def smembers(self, name: str) -> Set[str]:
         return await self._r.smembers(name)
 
     async def sadd(self, name: str, member: str):
@@ -98,7 +99,7 @@ class LocalStateStore(StateStore):
     def __init__(self):
         self._data: dict[str, str] = {}
         self._hash_data: dict[str, dict[str, str]] = {}
-        self._set_data: dict[str, set[str]] = {}
+        self._set_data: dict[str, Set[str]] = {}
 
     async def get(self, key: str) -> str | None:
         return self._data.get(key)
@@ -130,11 +131,11 @@ class LocalStateStore(StateStore):
         if store:
             store.pop(key, None)
 
-    async def hkeys(self, name: str) -> list[str]:
+    async def hkeys(self, name: str) -> List[str]:
         store = self._hash_data.get(name)
         return list(store.keys()) if store else []
 
-    async def smembers(self, name: str) -> set[str]:
+    async def smembers(self, name: str) -> Set[str]:
         return set(self._set_data.get(name, set()))
 
     async def sadd(self, name: str, member: str):

@@ -9,7 +9,7 @@ from typing import Any
 from app.core.logging import logger
 from app.core.metrics import system_mode_gauge, mode_transitions_total
 from app.core.mode_context import MODE_CONTEXTS, get_hold_time
-from app.core.state_store import get_state_store
+from app.redis import get_redis
 
 
 _REDIS_KEY = "system:mode"
@@ -289,19 +289,19 @@ class ModeManager:
 
     async def _persist(self, mode: SystemMode, reason: str):
         try:
-            store = await get_state_store()
+            r = await get_redis()
             payload = json.dumps({"mode": mode.value, "reason": reason, "updated_at": time.monotonic()})
-            await store.set(_REDIS_KEY, payload, ex=3600)
+            await r.set(_REDIS_KEY, payload, ex=3600)
             _LOCAL_CACHE["mode"] = mode.value
             _LOCAL_CACHE["reason"] = reason
             _LOCAL_CACHE["updated_at"] = time.monotonic()
         except Exception as e:
             logger.error("mode_persist_failed", error=str(e))
 
-    async def load_from_store(self):
+    async def load_from_redis(self):
         try:
-            store = await get_state_store()
-            raw = await store.get(_REDIS_KEY)
+            r = await get_redis()
+            raw = await r.get(_REDIS_KEY)
             if raw:
                 data = json.loads(raw)
                 self._mode = SystemMode(data.get("mode", "normal"))

@@ -130,10 +130,6 @@ async def run_startup_reconciliation(db: AsyncSession) -> dict:
 
 
 async def check_redis_persistence(r) -> bool:
-    from app.config import settings
-    if not settings.REDIS_ENABLED:
-        logger.info("redis_not_configured_skipping_persistence_check")
-        return True
     try:
         config = await r.config_get("appendonly")
         aof_enabled = config.get("appendonly") == "yes"

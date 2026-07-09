@@ -1,18 +1,19 @@
 # SHADOW_OPERATIONS_REPORT
-Generated at: 2026-07-01T09:44:46.665866
-Global Snapshot Hash: 789b49a3572acc98e97d9a45dec7d91ce12868626f04eab03aa1605a6a9273b9
+Generated at: 2026-06-29T13:28:32.043824
+Global Snapshot Hash: b99fdebd9671a13d8a7851742d332d0914bb90d7259fed09e5de9117c3c8efb6
 
 ## Throughput & Health
 | Metric | Value |
 |--------|-------|
-| Total Resolved Decisions | 0 |
-| Global Replay Parity | NOT_AVAILABLE |
-| Global Brier Score | NOT_AVAILABLE |
-| Total Realized EV | NOT_AVAILABLE |
+| Total Resolved Decisions | 1 |
+| Global Replay Parity | 100.00% |
+| Global Brier Score | 0.0400 |
+| Total Realized EV | 10.0000 |
 
 ## Strategy Rankings
 | Strategy | Status | Realized EV | Stability Issues | Snapshot Hash |
 |----------|--------|-------------|------------------|---------------|
+| strat | NOT_READY | 10.0000 | 0 | 45e0b3cdf1a4766212b927f23e12476ffed25c652cf343351246da791f1e248e |
 
 ## Certification Health
 | Invariant | Violations | Status |

@@ -2,9 +2,8 @@ import time
 from datetime import datetime, timezone
 from typing import Any, Callable
 
-from app.config import settings
 from app.core.logging import logger
-from app.core.state_store import get_state_store
+from app.redis import get_redis
 from app.ws.manager import manager
 from app.services.control.control_plane import control_plane
 from app.services.audit.audit_logger import emit
@@ -14,11 +13,9 @@ CB_REGISTRY_KEY = f"{CB_PREFIX}registry"
 CB_ACTIVE_KEY = f"{CB_PREFIX}active"
 
 
-async def _safe_store():
-    if not settings.REDIS_ENABLED:
-        return None
+async def _safe_redis():
     try:
-        return await get_state_store()
+        return await get_redis()
     except Exception:
         return None
 
@@ -35,14 +32,14 @@ class CircuitBreaker:
             if time.time() - self._local_trigger.get("triggered_at", 0) < self.cooldown:
                 return True
             self._local_trigger = None
-        store = await _safe_store()
-        if store is None:
+        r = await _safe_redis()
+        if r is None:
             return False
         try:
-            val = await store.hget(CB_ACTIVE_KEY, self.name)
+            val = await r.hget(CB_ACTIVE_KEY, self.name)
             if not val:
                 return False
-            data = eval(val)
+            data = eval(val.decode())
             return time.time() - data.get("triggered_at", 0) < self.cooldown
         except Exception:
             return False
@@ -65,10 +62,10 @@ class CircuitBreaker:
             "cooldown": self.cooldown,
         }
         self._local_trigger = entry
-        store = await _safe_store()
-        if store is not None:
+        r = await _safe_redis()
+        if r is not None:
             try:
-                await store.hset(CB_ACTIVE_KEY, self.name, str(entry))
+                await r.hset(CB_ACTIVE_KEY, self.name, str(entry))
             except Exception:
                 pass
         await self._broadcast(entry)
@@ -78,10 +75,10 @@ class CircuitBreaker:
 
     async def reset(self):
         self._local_trigger = None
-        store = await _safe_store()
-        if store is not None:
+        r = await _safe_redis()
+        if r is not None:
             try:
-                await store.hdel(CB_ACTIVE_KEY, self.name)
+                await r.hdel(CB_ACTIVE_KEY, self.name)
             except Exception:
                 pass
         await self._broadcast({"name": self.name, "status": "reset"})
@@ -122,12 +119,12 @@ class CircuitBreakerSystem:
         results = []
         for breaker in self._breakers.values():
             if await breaker.is_triggered():
-                store = await _safe_store()
-                if store is not None:
+                r = await _safe_redis()
+                if r is not None:
                     try:
-                        val = await store.hget(CB_ACTIVE_KEY, breaker.name)
+                        val = await r.hget(CB_ACTIVE_KEY, breaker.name)
                         if val:
-                            data = eval(val)
+                            data = eval(val.decode())
                             results.append(data)
                             continue
                     except Exception:

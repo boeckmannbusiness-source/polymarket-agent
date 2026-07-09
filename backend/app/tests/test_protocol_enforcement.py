@@ -138,7 +138,7 @@ async def test_control_plane_blocks_trades_when_disabled():
     When trading is disabled, execution must be blocked.
     """
     cp = ControlPlane()
-    with patch.object(cp, "_store", return_value=None):
+    with patch.object(cp, "_redis_or", return_value=None):
         await cp.set_trading_enabled(False)
         enabled = await cp.is_trading_enabled()
         assert not enabled, "Control plane should report trading disabled"

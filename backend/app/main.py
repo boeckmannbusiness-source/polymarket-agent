@@ -125,7 +125,7 @@ async def lifespan(app: FastAPI):
 
     # Register the mode manager early so background tasks can call get_mode_manager()
     try:
-        await asyncio.wait_for(_mode_manager.load_from_store(), timeout=10)
+        await asyncio.wait_for(_mode_manager.load_from_redis(), timeout=10)
     except Exception:
         logger.warning("mode_manager_load_failed")
 
@@ -156,19 +156,10 @@ async def lifespan(app: FastAPI):
     bg_tasks.append(asyncio.create_task(orchestrator.start_all(), name="orchestrator"))
     logger.info("orchestrator_started")
 
-    r = None
-    redis_available = settings.REDIS_ENABLED
+    try:
+        from app.redis import get_redis
+        r = await get_redis()
 
-    if redis_available:
-        try:
-            from app.redis import get_redis
-            r = await get_redis()
-            if r is None:
-                redis_available = False
-        except Exception:
-            redis_available = False
-
-    if redis_available and r is not None:
         if settings.SHADOW_MODE:
             for stream, group in [
                 ("market:data", "persistence_bridge"),
@@ -179,8 +170,8 @@ async def lifespan(app: FastAPI):
             ]:
                 try:
                     await r.xgroup_destroy(stream, group)
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.warning("shadow_xgroup_destroy_failed", stream=stream, group=group, error=str(e), exc_info=True)
                 try:
                     await r.xgroup_create(stream, group, id="$", mkstream=True)
                     logger.info("shadow_consumer_group_reset", stream=stream, group=group)
@@ -225,19 +216,15 @@ async def lifespan(app: FastAPI):
                 logger.info("redis_aof_enabled")
         except Exception as e:
             logger.error("redis_config_validation_failed", error=str(e), exc_info=True)
-    else:
-        logger.info("redis_not_configured_skipping_startup_validation")
 
-    from app.core.stream_registry import StreamRegistry
-    for config in StreamRegistry.active_in_phase1():
-        if not config.consumer_groups:
-            logger.error("stream_registry_no_consumer_groups", stream=config.name)
-        logger.info("stream_registry_active", stream=config.name, groups=list(config.consumer_groups))
+        from app.core.stream_registry import StreamRegistry
+        for config in StreamRegistry.active_in_phase1():
+            if not config.consumer_groups:
+                logger.error("stream_registry_no_consumer_groups", stream=config.name)
+            logger.info("stream_registry_active", stream=config.name, groups=list(config.consumer_groups))
 
-    try:
         from app.services.reconciliation_service import check_redis_persistence, run_startup_reconciliation
-        if redis_available and r is not None:
-            await check_redis_persistence(r)
+        await check_redis_persistence(r)
         async with async_session_factory() as rec_db:
             rec_report = await run_startup_reconciliation(rec_db)
             if rec_report and any(rec_report[k] > 0 for k in rec_report if isinstance(rec_report[k], int)):
@@ -463,8 +450,8 @@ async def lifespan(app: FastAPI):
     bg_tasks.append(asyncio.create_task(_shadow_eval_loop(), name="shadow_eval"))
     logger.info("shadow_eval_started")
 
-    # ── Sprint 9.0 / 9.0A Shadow Operations ──
-    bg_tasks.append(asyncio.create_task(_periodic_shadow_runtime_runner(), name="shadow_runtime_runner"))
+    # ── Sprint 9.0 Shadow Operations ──
+    bg_tasks.append(asyncio.create_task(_periodic_shadow_runtime_scheduler(), name="shadow_runtime_scheduler"))
     bg_tasks.append(asyncio.create_task(_periodic_shadow_aging_check(), name="shadow_aging_check"))
     bg_tasks.append(asyncio.create_task(_periodic_shadow_readiness_observation(), name="shadow_readiness_observation"))
     logger.info("shadow_ops_started")
@@ -1399,18 +1386,13 @@ async def _shadow_price_tracker_loop():
         await asyncio.sleep(settings.SOLANA_SHADOW_EVAL_INTERVAL)
 
 
-async def _periodic_shadow_runtime_runner():
+async def _periodic_shadow_runtime_scheduler():
     from app.database import async_session_factory
-    from app.services.shadow.runtime_runner import ShadowRuntimeRunner
+    from app.services.shadow.runtime_scheduler import ShadowRuntimeScheduler
 
     await asyncio.sleep(30)
-    runner = ShadowRuntimeRunner(
-        session_factory=async_session_factory,
-        interval_seconds=60,
-        runtime_target_seconds=3600,
-    )
-    await runner.start()
-    await runner.export_runtime_evidence()
+    scheduler = ShadowRuntimeScheduler(async_session_factory, interval_seconds=60)
+    await scheduler.start()
 
 
 async def _periodic_shadow_aging_check():
